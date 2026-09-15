@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, ArrowUpRight, BookOpen, Cable, ChevronDown, ChevronRight, CircleHelp, ClipboardCheck, FileDown, FileText,
-  Gauge, Info, Layers3, Lightbulb, Menu, Network, OctagonAlert, PanelLeftClose, Pencil, Plug, Plus, RotateCw, Search,
+  Gauge, Info, Layers3, Lightbulb, Menu, Network, OctagonAlert, PanelLeftClose, Pencil, Plug, Plus, RotateCw,
   Settings2, Sparkles, Activity, Table2, Trash2, Zap, Building2, X,
 } from 'lucide-react';
 import { calcVoltageDrop } from '../../src/core/calc/voltageDrop';
@@ -302,7 +302,7 @@ export function App() {
       <button className="collapse" onClick={() => setRailOpen(!railOpen)}>{railOpen ? <PanelLeftClose size={18}/> : <Menu size={18}/>} {railOpen && 'Collapse sidebar'}</button>
     </aside>
     <main>
-      <header><button className="crumb" onClick={() => setShowProjects(true)}><span>Project</span><b>{activeProject?.name ?? '—'}</b><ChevronDown size={15}/></button><div className="header-actions"><button className="icon-button" aria-label="Search tools" onClick={() => setInfoPanel('help')}><Search size={18}/></button><button className="icon-button" aria-label="Help" onClick={() => setInfoPanel('help')}><CircleHelp size={18}/></button><div className="avatar">JA</div></div></header>
+      <header><button className="crumb" onClick={() => setShowProjects(true)}><span>Project</span><b>{activeProject?.name ?? '—'}</b><ChevronDown size={15}/></button><div className="header-actions"><button className="icon-button" aria-label="Help" onClick={() => setInfoPanel('help')}><CircleHelp size={18}/></button><div className="avatar">JA</div></div></header>
       <section className="context">
         <div><p className="eyebrow">{view === 'oneline' ? 'ONE-LINE PROJECT' : 'QUICK WORKBENCH'}</p><h1>{view === 'oneline' ? <>Design as a <i>connected system.</i></> : <>Electrical calculations, <i>defensible by design.</i></>}</h1><p className="subhead">{view === 'oneline' ? 'Build a one-line hierarchy — every node keeps its own inputs, results, and audit trail, with fault current and panel loading flowing between linked nodes.' : 'Every result is paired with its inputs, code references, and a transparent calculation trail.'}</p></div>
         {view === 'workbench' && <button className="new-button" onClick={resetAll}><Plus size={18}/> New calculation</button>}
