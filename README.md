@@ -76,7 +76,9 @@ ee-workbench/
 ## Known gaps (by design, not oversight)
 
 These are called out in code comments and enforced by throwing errors rather
-than silently guessing — treat them as the Phase 2 backlog:
+than silently guessing — treat them as the Phase 2 backlog. See
+[`VERIFICATION.md`](VERIFICATION.md) for the table-by-table checklist tracking
+progress toward verifying every table against the physical NFPA 70 text.
 
 - **Motor locked-rotor current (LRA)**: NEC Tables 430.248-430.251 are
   FULL-LOAD CURRENT tables — there is no NEC-tabulated LRA-by-HP table, and
