@@ -1,0 +1,28 @@
+{
+  "name": "ee-workbench",
+  "version": "0.3.1",
+  "description": "Electrical Engineering Workbench — NEC-based calculation kernel (voltage drop, conductor sizing, conduit fill, load calc, transformer sizing, PF correction) with a full audit trail and a strict no-fabrication policy on table data.",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "ui": "vite --config ui/vite.config.ts",
+    "ui:build": "vite build --config ui/vite.config.ts",
+    "test:validation": "npm run build && node dist/tests/validation.js",
+    "test:anti-fabrication": "npm run build && node dist/tests/anti-fabrication.js",
+    "test": "npm run test:validation && npm run test:anti-fabrication",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "typescript": "^5.4.0",
+    "vite": "^5.4.10"
+  },
+  "dependencies": {
+    "dexie": "^4.4.6",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}
