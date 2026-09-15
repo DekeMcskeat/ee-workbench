@@ -24,20 +24,37 @@ transcription typos/digit-swaps) but does **not** count as verification
 against the physical NFPA 70 text, since it's checking one secondary source
 (this model's training data) against another (the existing transcription).
 
+## Physical-text pass completed 2026-09-15 (against a real NFPA 70 PDF the user supplied — `2017-NEC-Code-2.pdf`)
+
+This is the real step-2 check the checklist calls for, but note the edition
+mismatch: the sourcing notes in every table file claim NEC **2023**, while
+the PDF checked against is the **2017** edition. All rows below are checked
+against 2017 text only — re-confirm against a 2023 copy before calling the
+"NEC 2023" claim in the code comments verified. (For the specific tables
+checked here — 310.15(B)(16)/former 310.16, 310.15(B)(2)(a)/(3)(a), 430.250,
+430.7(B), 250.122, 240.6(A), 240.4(D) — these tables are known to be
+unchanged 2017→2023, so the values themselves should still hold; the
+edition-label mismatch is a documentation issue, not a data one.)
+
+Found and fixed one real transcription bug (not caught by the AI cross-check
+pass): `table430.ts`, Table 430.250, 1.5 HP row, 575V column was `2.1`;
+the physical text gives `2.4` (the wrong value matches the 1 HP row's 460V
+entry, suggesting a copy/paste slip). Corrected in `table430.ts`.
+
 | # | Table | File | AI cross-check | Physical-text check |
 |---|---|---|---|---|
-| 1 | 310.16 — Ampacities | `table310_16.ts` | ✅ exact match | ☐ |
-| 2 | 430.250 — Motor FLC (3-phase) | `table430.ts` | ✅ exact match | ☐ |
-| 3 | 430.7(B) — NEMA code letter kVA/HP | `table430.ts` | ✅ exact match | ☐ |
-| 4 | 250.122 — EGC sizing | `table250_122.ts` | ✅ exact match | ☐ |
-| 5 | 240.6(A) — Standard OCPD sizes | `table240_6.ts` | ✅ exact match | ☐ |
-| 6 | 240.4(D) — Small-conductor OCPD caps | `table240_6.ts` | ✅ exact match | ☐ |
-| 7 | 310.15(B)(1) — Ambient correction | `table310_15.ts` | ✅ exact match | ☐ |
-| 8 | 310.15(C)(1) — CCC adjustment | `table310_15.ts` | ✅ exact match | ☐ |
-| 9 | Ch.9 Table 1 — Fill percentages | `chapter9.ts` | ✅ exact match | ☐ |
-| 10 | Ch.9 Table 4 — EMT conduit areas | `chapter9.ts` | ✅ exact match | ☐ |
-| 11 | Ch.9 Table 5 — THHN conductor areas | `chapter9.ts` | ✅ exact match | ☐ |
-| 12 | Ch.9 Table 9 — AC resistance/reactance | `chapter9.ts` | ⚠️ spot-checked only — lower confidence, more decimal precision than reliably recalled | ☐ **priority** |
+| 1 | 310.16 — Ampacities | `table310_16.ts` | ✅ exact match | ✅ exact match vs. 2017 text |
+| 2 | 430.250 — Motor FLC (3-phase) | `table430.ts` | ✅ exact match | ⚠️ **found error, fixed**: 1.5 HP/575V was 2.1, corrected to 2.4 |
+| 3 | 430.7(B) — NEMA code letter kVA/HP | `table430.ts` | ✅ exact match | ✅ exact match vs. 2017 text |
+| 4 | 250.122 — EGC sizing | `table250_122.ts` | ✅ exact match | ✅ exact match vs. 2017 text |
+| 5 | 240.6(A) — Standard OCPD sizes | `table240_6.ts` | ✅ exact match | ✅ exact match vs. 2017 text |
+| 6 | 240.4(D) — Small-conductor OCPD caps | `table240_6.ts` | ✅ exact match | ✅ exact match vs. 2017 text |
+| 7 | 310.15(B)(1) — Ambient correction | `table310_15.ts` | ✅ exact match | ✅ exact match vs. 2017 text |
+| 8 | 310.15(C)(1) — CCC adjustment | `table310_15.ts` | ✅ exact match | ✅ exact match vs. 2017 text |
+| 9 | Ch.9 Table 1 — Fill percentages | `chapter9.ts` | ✅ exact match | ✅ exact match vs. 2017 text |
+| 10 | Ch.9 Table 4 — EMT conduit areas | `chapter9.ts` | ✅ exact match | ✅ exact match vs. 2017 text (all 8 EMT rows) |
+| 11 | Ch.9 Table 5 — THHN conductor areas | `chapter9.ts` | ✅ exact match | ✅ exact match vs. 2017 text |
+| 12 | Ch.9 Table 9 — AC resistance/reactance | `chapter9.ts` | ⚠️ spot-checked only — lower confidence, more decimal precision than reliably recalled | ⚠️ **needs a closer look**: most rows matched, but the 8 AWG copper / steel-conduit resistance cell looked like it might read `0.69` Ω/1000ft in the scanned PDF vs. `0.78` in `chapter9.ts` — image resolution wasn't reliable enough at that decimal precision to be certain. **Priority: re-check this one cell (and neighboring rows) against a sharp physical/PDF copy before trusting this table for anything precision-sensitive.** |
 
 ## Not yet populated (unchanged from README "Known gaps")
 
