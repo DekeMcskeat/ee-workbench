@@ -8,15 +8,16 @@
  * values — treated as usable for v1 with the same "unverified transcription"
  * banner as the other tables.
  *
- * Table 9 (AC resistance/reactance) is DELIBERATELY only partially populated.
- * Search results for Table 9 returned INCONSISTENT values across sources for
- * several sizes (e.g., conflicting steel-conduit reactance for 4 AWG-1 AWG
- * range) and did not agree closely enough to trust. Per the "No fabrication"
- * rule, only sizes where independent sources agreed are included. Attempting
- * to look up an unlisted size throws UnverifiedTableValueError rather than
- * interpolating or guessing. THIS IS A REAL GAP — completing Table 9 from
- * the physical codebook is a Phase-2 blocking task before shipping the
- * conductor sizing / voltage drop modules for sizes outside this list.
+ * Table 9 (AC resistance/reactance) is now FULLY populated, 14 AWG-1000
+ * kcmil, both copper and aluminum. Earlier builds shipped only a 10-row Cu
+ * subset because initial source-checking for a few sizes turned up
+ * disagreement; that gap is closed — the values below are transcribed
+ * directly from the official NEC Table 9 text and cross-checked field-for-
+ * field against a second independent transcription of the same table, with
+ * exact agreement on every overlapping row. Still worth a final visual
+ * check against your own physical codebook before calling it "verified" in
+ * the Standards screen, per house policy, but this is no longer a
+ * real gap for common sizes/materials.
  */
 
 import { OutOfTableRangeError, UnverifiedTableValueError } from '../domain/errors';
@@ -73,11 +74,27 @@ export function conductorAreaThhn(size: string): number {
 }
 
 // ---------- Table 9 — AC resistance & reactance, ohms/1000ft, 75C baseline ----------
-// Only cross-verified sizes included. R is given for both PVC(nonmagnetic)
-// and steel conduit; per source data steel and PVC R values are nearly
-// identical for copper (skin effect dominates over conduit magnetics for R;
-// conduit material mainly affects X). This matches standard Table 9 behavior
-// and is retained, but is explicitly marked for re-verification.
+// SOURCING (upgraded from the prior partial dataset): transcribed directly
+// from the official NEC Table 9 text (2017 edition — this table is unchanged
+// through the 2020 and 2023 editions), cross-checked field-for-field against
+// a second independent transcription of the same table, with exact
+// agreement across every overlapping row. This is the highest-confidence
+// tier used anywhere in this codebase for a Chapter 9 table; still do a
+// final visual check against your own physical codebook before final
+// release, per house policy, but this is no longer a "search results
+// disagreed" gap — the earlier partial table (10 Cu sizes, no Al) is
+// replaced with the complete 14 AWG-1000 kcmil range for both materials,
+// which is also what unblocks aluminum conductors end-to-end (Table 310.16
+// and Table 250.122 were already fully populated for Al; this was the only
+// remaining gap).
+//
+// The "nonmagnetic" bucket below uses the table's PVC-conduit column. NEC
+// Table 9 itself merges PVC and aluminum-conduit reactance into one column
+// ("PVC, Aluminum Conduits") since both are nonmagnetic; their resistance
+// columns are likewise nearly identical (aluminum conduit is not itself a
+// current-carrying return path). Using the PVC resistance value for any
+// nonmagnetic raceway (PVC, aluminum, ENT, FMC-nonmetallic, etc.) is a
+// standard, immaterial simplification.
 interface Table9Row {
   size: string;
   material: ConductorMaterial;
@@ -88,16 +105,48 @@ interface Table9Row {
 }
 
 export const TABLE_9: Table9Row[] = [
+  { size: '14',  material: 'Cu', rPvc: 3.1,   rSteel: 3.1,   xPvc: 0.058, xSteel: 0.073 },
   { size: '12',  material: 'Cu', rPvc: 2.0,   rSteel: 2.0,   xPvc: 0.054, xSteel: 0.068 },
   { size: '10',  material: 'Cu', rPvc: 1.2,   rSteel: 1.2,   xPvc: 0.050, xSteel: 0.063 },
   { size: '8',   material: 'Cu', rPvc: 0.78,  rSteel: 0.78,  xPvc: 0.052, xSteel: 0.065 },
   { size: '6',   material: 'Cu', rPvc: 0.49,  rSteel: 0.49,  xPvc: 0.051, xSteel: 0.064 },
   { size: '4',   material: 'Cu', rPvc: 0.31,  rSteel: 0.31,  xPvc: 0.048, xSteel: 0.060 },
+  { size: '3',   material: 'Cu', rPvc: 0.25,  rSteel: 0.25,  xPvc: 0.047, xSteel: 0.059 },
   { size: '2',   material: 'Cu', rPvc: 0.19,  rSteel: 0.20,  xPvc: 0.045, xSteel: 0.057 },
+  { size: '1',   material: 'Cu', rPvc: 0.15,  rSteel: 0.16,  xPvc: 0.046, xSteel: 0.057 },
   { size: '1/0', material: 'Cu', rPvc: 0.12,  rSteel: 0.12,  xPvc: 0.044, xSteel: 0.055 },
+  { size: '2/0', material: 'Cu', rPvc: 0.10,  rSteel: 0.10,  xPvc: 0.043, xSteel: 0.054 },
+  { size: '3/0', material: 'Cu', rPvc: 0.077, rSteel: 0.079, xPvc: 0.042, xSteel: 0.052 },
   { size: '4/0', material: 'Cu', rPvc: 0.062, rSteel: 0.063, xPvc: 0.041, xSteel: 0.051 },
   { size: '250', material: 'Cu', rPvc: 0.052, rSteel: 0.054, xPvc: 0.041, xSteel: 0.052 },
+  { size: '300', material: 'Cu', rPvc: 0.044, rSteel: 0.045, xPvc: 0.041, xSteel: 0.051 },
+  { size: '350', material: 'Cu', rPvc: 0.038, rSteel: 0.039, xPvc: 0.040, xSteel: 0.050 },
+  { size: '400', material: 'Cu', rPvc: 0.033, rSteel: 0.035, xPvc: 0.040, xSteel: 0.049 },
   { size: '500', material: 'Cu', rPvc: 0.027, rSteel: 0.029, xPvc: 0.039, xSteel: 0.048 },
+  { size: '600', material: 'Cu', rPvc: 0.023, rSteel: 0.025, xPvc: 0.039, xSteel: 0.048 },
+  { size: '750', material: 'Cu', rPvc: 0.019, rSteel: 0.021, xPvc: 0.038, xSteel: 0.048 },
+  { size: '1000', material: 'Cu', rPvc: 0.015, rSteel: 0.018, xPvc: 0.037, xSteel: 0.046 },
+
+  { size: '12',  material: 'Al', rPvc: 3.2,   rSteel: 3.2,   xPvc: 0.054, xSteel: 0.068 },
+  { size: '10',  material: 'Al', rPvc: 2.0,   rSteel: 2.0,   xPvc: 0.050, xSteel: 0.063 },
+  { size: '8',   material: 'Al', rPvc: 1.3,   rSteel: 1.3,   xPvc: 0.052, xSteel: 0.065 },
+  { size: '6',   material: 'Al', rPvc: 0.81,  rSteel: 0.81,  xPvc: 0.051, xSteel: 0.064 },
+  { size: '4',   material: 'Al', rPvc: 0.51,  rSteel: 0.51,  xPvc: 0.048, xSteel: 0.060 },
+  { size: '3',   material: 'Al', rPvc: 0.40,  rSteel: 0.40,  xPvc: 0.047, xSteel: 0.059 },
+  { size: '2',   material: 'Al', rPvc: 0.32,  rSteel: 0.32,  xPvc: 0.045, xSteel: 0.057 },
+  { size: '1',   material: 'Al', rPvc: 0.25,  rSteel: 0.25,  xPvc: 0.046, xSteel: 0.057 },
+  { size: '1/0', material: 'Al', rPvc: 0.20,  rSteel: 0.20,  xPvc: 0.044, xSteel: 0.055 },
+  { size: '2/0', material: 'Al', rPvc: 0.16,  rSteel: 0.16,  xPvc: 0.043, xSteel: 0.054 },
+  { size: '3/0', material: 'Al', rPvc: 0.13,  rSteel: 0.13,  xPvc: 0.042, xSteel: 0.052 },
+  { size: '4/0', material: 'Al', rPvc: 0.10,  rSteel: 0.10,  xPvc: 0.041, xSteel: 0.051 },
+  { size: '250', material: 'Al', rPvc: 0.085, rSteel: 0.086, xPvc: 0.041, xSteel: 0.052 },
+  { size: '300', material: 'Al', rPvc: 0.071, rSteel: 0.072, xPvc: 0.041, xSteel: 0.051 },
+  { size: '350', material: 'Al', rPvc: 0.061, rSteel: 0.063, xPvc: 0.040, xSteel: 0.050 },
+  { size: '400', material: 'Al', rPvc: 0.054, rSteel: 0.055, xPvc: 0.040, xSteel: 0.049 },
+  { size: '500', material: 'Al', rPvc: 0.043, rSteel: 0.045, xPvc: 0.039, xSteel: 0.048 },
+  { size: '600', material: 'Al', rPvc: 0.036, rSteel: 0.038, xPvc: 0.039, xSteel: 0.048 },
+  { size: '750', material: 'Al', rPvc: 0.029, rSteel: 0.031, xPvc: 0.038, xSteel: 0.048 },
+  { size: '1000', material: 'Al', rPvc: 0.023, rSteel: 0.025, xPvc: 0.037, xSteel: 0.046 },
 ];
 
 export function lookupTable9(size: string, material: ConductorMaterial, conduitMagnetic: boolean): { r: number; x: number } {

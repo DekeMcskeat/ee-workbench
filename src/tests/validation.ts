@@ -14,6 +14,8 @@ import { calcConduitFill } from '../core/calc/conduitFill';
 import { calcLoad } from '../core/calc/loadCalc';
 import { sizeTransformer } from '../core/calc/transformer';
 import { calcPfCorrection } from '../core/calc/pfCorrection';
+import { calcMotorStarting } from '../core/calc/motorStarting';
+import { calcPanelBalance } from '../core/calc/panelBalance';
 import { lookupAmpacity } from '../core/tables/table310_16';
 import { ambientCorrectionFactor, cccAdjustmentFactor } from '../core/tables/table310_15';
 
@@ -66,8 +68,46 @@ console.log('\n--- V3: Transformer SCC, 1000kVA 13.8kV-480V, 5.75%Z, infinite pr
   assertClose('V3 available SC current', out.result.secondaryAvailableFaultCurrent, 20918, 0.5);
 }
 
-console.log('\n--- V4: Motor starting dip -- BLOCKED (Table 430.251 LRA not verified) ---');
-console.log('SKIP  V4: NEC Table 430.251 locked-rotor data not populated (no fabrication policy). See core/tables/table430.ts.');
+console.log('\n--- V4: Motor starting dip, 50HP 460V 3ph NEMA Design B DOL, 100ft 1/0 Cu feeder, 25kA source ---');
+{
+  // CORRECTED SOURCING (per accepted spec correction): NEC 430.248-430.251
+  // are FLC tables, not LRA. LRA here comes from the NEMA design-letter
+  // rule-of-thumb path (Design B ~6-7x FLC, midpoint 6.5x), since neither
+  // nameplate LRA nor a NEMA code letter was given in the V4 spec. This is
+  // logged as an `engineering_judgment` assumption by resolveMotorLra(),
+  // never silently assumed.
+  //
+  // Hand derivation:
+  //   FLC (Table 430.250, 50HP/460V) = 65A
+  //   LRA = 6.5 x 65 = 422.5A  (Design B midpoint rule of thumb)
+  //   V_LN = 460/sqrt(3) = 265.581V
+  //   Z_source = V_LN / I_sc = 265.581/25000 = 0.010623 ohm (reactive-only assumption, no X/R given)
+  //   Feeder: 1/0 Cu, steel conduit, 75C op temp (assumed, undocumented in spec), 100ft, 1 set
+  //     R = 0.12 ohm/kft x 0.1 = 0.012 ohm; X = 0.055 ohm/kft x 0.1 = 0.0055 ohm
+  //     Z_cable = sqrt(0.012^2+0.0055^2) = 0.01320 ohm
+  //   Z_upstream = sqrt(R_cable^2 + (Z_source+X_cable)^2) = sqrt(0.012^2+0.016123^2) = 0.020099 ohm
+  //   Z_motor (locked rotor, rated V) = V_LN/LRA = 265.581/422.5 = 0.62870 ohm
+  //   V_term,pu = Z_motor/(Z_upstream+Z_motor) = 0.62870/0.648799 = 0.96902 -> dip = 3.10%
+  //   I_actual = V_LN/(Z_upstream+Z_motor) = 409.4A
+  //   Bus dip = I_actual x Z_source / V_LN x 100 = 1.64%
+  const out = calcMotorStarting({
+    hp: '50', voltage: 460, phase: 3,
+    nemaDesignLetter: 'B',
+    startingMethod: 'DOL',
+    sourceAvailableFaultCurrentA: 25000,
+    feeder: { size: '1/0', material: 'Cu', lengthFt: 100, conduitMagnetic: true, conductorOperatingTempC: 75, parallelSets: 1 },
+  });
+  assertClose('V4 FLC (Table 430.250)', out.result.flc, 65, 0.5);
+  assertClose('V4 LRA (Design B rule-of-thumb, 6.5x FLC)', out.result.lra, 422.5, 0.5);
+  assertClose('V4 Z_source', out.result.zSourceOhm, 0.010623, 1);
+  assertClose('V4 Z_cable', out.result.zCableOhm, 0.01320, 1);
+  assertClose('V4 Z_upstream', out.result.zUpstreamOhm, 0.020099, 1);
+  assertClose('V4 Z_motor locked-rotor', out.result.zMotorLockedRotorOhm, 0.62870, 1);
+  assertClose('V4 terminal voltage dip %', out.result.terminalVoltageDipPct, 3.098, 3);
+  assertClose('V4 bus voltage dip %', out.result.busVoltageDipPct, 1.637, 3);
+  assertTrue('V4 within NEMA 15% starting-dip guideline (not blocked)', out.result.terminalVoltageDipPct < 15);
+  assertTrue('V4 LRA source logged as engineering_judgment assumption', out.assumptions.some(a => a.kind === 'engineering_judgment'));
+}
 
 console.log('\n--- V5: Conduit fill boundary case, 4x4/0 THHN Cu + 1x#6 THHN Cu EGC in 2" EMT ---');
 {
@@ -114,6 +154,52 @@ console.log('\n--- V8: Capacitor sizing, 500kW 0.80PF -> 0.95PF ---');
 {
   const out = calcPfCorrection({ kw: 500, existingPf: 0.80, targetPf: 0.95, kvaScAtBus: 15000 });
   assertClose('V8 required kVAR', out.result.requiredKvar, 210.66, 1);
+}
+
+console.log('\n--- V9: Panel phase balance, 3ph 4w, 5 circuits including 2-pole and 3-pole taps ---');
+{
+  // Hand derivation:
+  //   Lighting A: 1200 VA on A
+  //   Lighting B: 1200 VA on B
+  //   Lighting C: 1000 VA on C
+  //   HVAC (3-pole ABC, 6000 VA): 2000 VA per leg on A, B, C
+  //   Receptacles (2-pole AB, 1800 VA): 900 VA per leg on A, B
+  //   Phase A = 1200 + 2000 + 900 = 4100
+  //   Phase B = 1200 + 2000 + 900 = 4100
+  //   Phase C = 1000 + 2000        = 3000
+  //   Total = 11200, Average = 11200/3 = 3733.33
+  //   Imbalance% = (4100-3000)/3733.33 x 100 = 29.46% -> exceeds 20% guideline, warning expected
+  const out = calcPanelBalance({
+    phaseConfig: '3ph_4w',
+    circuits: [
+      { name: 'Lighting A', va: 1200, tap: 'A' },
+      { name: 'Lighting B', va: 1200, tap: 'B' },
+      { name: 'Lighting C', va: 1000, tap: 'C' },
+      { name: 'HVAC', va: 6000, tap: 'ABC' },
+      { name: 'Receptacles', va: 1800, tap: 'AB' },
+    ],
+  });
+  assertClose('V9 phase A total', out.result.phaseVa.A, 4100, 0.5);
+  assertClose('V9 phase B total', out.result.phaseVa.B, 4100, 0.5);
+  assertClose('V9 phase C total', out.result.phaseVa.C, 3000, 0.5);
+  assertClose('V9 total VA', out.result.totalVa, 11200, 0.5);
+  assertClose('V9 imbalance %', out.result.imbalancePct, 29.46, 1);
+  assertTrue('V9 imbalance warning present (>20% guideline)', out.warnings.some(w => w.level === 'warning'));
+}
+
+console.log('\n--- V10: Voltage drop, 1ph, 240V, 150A, 100ft, 250kcmil ALUMINUM THHN, PVC conduit, PF 0.9 ---');
+{
+  // Hand derivation (Table 9, Al, PVC conduit, 250kcmil): R=0.085, X=0.041 ohm/kft
+  // theta = arccos(0.9) = 25.842deg, sin = 0.43589
+  // Ze = 0.085*0.9 + 0.041*0.43589 = 0.0765 + 0.017872 = 0.094372
+  // VD = 2*150*100*0.094372/1000 = 2.83116 V -> %VD = 2.83116/240 = 1.1797%
+  const out = calcVoltageDrop({
+    size: '250', material: 'Al', ampacityDesignCurrent: 150, lengthFt: 100, phase: '1ph',
+    conduitMagnetic: false, powerFactor: 0.9, nominalVoltage: 240, conductorOperatingTempC: 75, parallelSets: 1,
+  });
+  assertClose('V10 %VD exact (aluminum)', out.result.pctVdExact, 1.1797, 1);
+  assertClose('V10 VD volts (aluminum)', out.result.vdExact, 2.8312, 1);
+  assertTrue('V10 aluminum R/X resolved without throwing', out.result.rBaseOhmPerKft === 0.085);
 }
 
 console.log(`\n=== ${pass} passed, ${fail} failed ===`);

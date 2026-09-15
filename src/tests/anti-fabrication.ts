@@ -4,7 +4,7 @@
  */
 import { calcVoltageDrop } from '../core/calc/voltageDrop';
 import { sizeConductor } from '../core/calc/conductorSizing';
-import { lookupMotorLra } from '../core/tables/table430';
+import { resolveMotorLra } from '../core/tables/table430';
 import { lookupTable9 } from '../core/tables/chapter9';
 import { MissingRequiredInputError, UnverifiedTableValueError } from '../core/domain/errors';
 
@@ -26,12 +26,12 @@ expectThrow('Missing powerFactor throws MissingRequiredInputError', () => {
   calcVoltageDrop({ size: '1/0', material: 'Cu', ampacityDesignCurrent: 100, lengthFt: 100, phase: '3ph', conduitMagnetic: true, nominalVoltage: 480, conductorOperatingTempC: 75, parallelSets: 1 });
 }, MissingRequiredInputError);
 
-expectThrow('Unverified Table 430.251 LRA lookup throws, does not fabricate', () => {
-  lookupMotorLra('50', 460);
+expectThrow('LRA resolution with no nameplate/code-letter/design-letter source throws, does not fabricate', () => {
+  resolveMotorLra({ hp: 50, flc: 65, voltage: 460, phase: 3 });
 }, UnverifiedTableValueError);
 
-expectThrow('Table 9 lookup for unverified size throws', () => {
-  lookupTable9('750', 'Cu', true);
+expectThrow('Table 9 lookup for a size outside the tabulated range (2000 kcmil, table stops at 1000) throws', () => {
+  lookupTable9('2000', 'Cu', true);
 }, UnverifiedTableValueError);
 
 expectThrow('sizeConductor with missing targetPctVd throws', () => {
