@@ -146,10 +146,16 @@ button.crumb:hover b { text-decoration: underline; color: var(--accent); }
 .form-grid { padding: 17px 28px 27px; display: grid; grid-template-columns: 1fr 1fr; gap: 18px 17px; }
 .field { display: grid; gap: 7px; font-size: 12px; font-weight: 600; color: var(--text); }
 .input-shell, .select-shell { height: 41px; border: 1px solid var(--border); border-radius: 8px; display: flex; align-items: center; background: var(--surface); }
+.select-shell { background: var(--bg-2); border-color: var(--border-strong); }
 .input-shell:focus-within, .select-shell:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .input-shell input { min-width: 0; width: 100%; height: 100%; border: 0; background: transparent; padding: 0 11px; font: 500 14px 'JetBrains Mono'; color: var(--text); outline: 0; }
 .input-shell em { font: 11px 'JetBrains Mono'; color: var(--text-mute); padding: 0 11px; font-style: normal; }
-.select-shell select { width: 100%; height: 100%; padding: 0 10px; border: 0; background: transparent; font: 500 13px inherit; color: var(--text); outline: 0; }
+/* background/color set explicitly (not transparent) so the native option
+   list — which most browsers paint using the <select>'s own colors, not
+   its wrapper's — matches the theme instead of falling back to a
+   low-contrast system default. */
+.select-shell select { width: 100%; height: 100%; padding: 0 10px; border: 0; background: var(--bg-2); background-image: linear-gradient(45deg, transparent 50%, var(--text-dim) 50%), linear-gradient(135deg, var(--text-dim) 50%, transparent 50%); background-position: calc(100% - 18px) center, calc(100% - 13px) center; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; appearance: none; -webkit-appearance: none; font: 500 13px inherit; color: var(--text); outline: 0; }
+.select-shell select option { background: var(--bg-2); color: var(--text); }
 .check-field { grid-column: span 2; display: flex; gap: 10px; border: 1px solid var(--border); padding: 12px; border-radius: 8px; align-items: start; color: var(--text); font-size: 13px; }
 .check-field input { accent-color: var(--accent); margin-top: 2px; }
 .check-field small { display: block; color: var(--text-dim); font-size: 11px; margin-top: 3px; }
@@ -275,6 +281,8 @@ button.crumb:hover b { text-decoration: underline; color: var(--accent); }
 .mini-table th { text-align: left; color: var(--text-mute); font: 600 9.5px 'JetBrains Mono'; text-transform: uppercase; letter-spacing: .4px; padding: 0 6px 6px; border-bottom: 1px solid var(--border); }
 .mini-table td { padding: 5px 6px; border-bottom: 1px solid var(--border); color: var(--text); }
 .mini-table input, .mini-table select { width: 100%; border: 1px solid var(--border); border-radius: 6px; padding: 3px 5px; font: 500 11.5px inherit; background: var(--surface); color: var(--text); }
+.mini-table select { background: var(--bg-2); border-color: var(--border-strong); background-image: linear-gradient(45deg, transparent 50%, var(--text-dim) 50%), linear-gradient(135deg, var(--text-dim) 50%, transparent 50%); background-position: calc(100% - 12px) center, calc(100% - 8px) center; background-size: 4px 4px, 4px 4px; background-repeat: no-repeat; appearance: none; -webkit-appearance: none; padding-right: 20px; }
+.mini-table select option { background: var(--bg-2); color: var(--text); }
 .result-actions { margin-top: auto; padding-top: 19px; display: grid; gap: 10px; }
 .export-row { display: flex; gap: 8px; }
 .export-btn { flex: 1; border: 1px solid var(--border); background: var(--bg-1); border-radius: 8px; padding: 8px; display: flex; align-items: center; justify-content: center; gap: 6px; font: 600 11px inherit; color: var(--text); cursor: pointer; }
@@ -295,7 +303,8 @@ button.crumb:hover b { text-decoration: underline; color: var(--accent); }
 .field-view { max-width: 1000px; margin: 0 auto 40px; padding: 0 36px; }
 .field-project-bar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
 .field-project-bar label { display: flex; align-items: center; gap: 8px; font: 600 12px inherit; color: var(--text); }
-.field-project-bar select { height: 36px; border: 1px solid var(--border); border-radius: 8px; padding: 0 10px; font: 500 13px inherit; color: var(--text); background: var(--surface); }
+.field-project-bar select { height: 36px; border: 1px solid var(--border-strong); border-radius: 8px; padding: 0 24px 0 10px; font: 500 13px inherit; color: var(--text); background: var(--bg-2); background-image: linear-gradient(45deg, transparent 50%, var(--text-dim) 50%), linear-gradient(135deg, var(--text-dim) 50%, transparent 50%); background-position: calc(100% - 16px) center, calc(100% - 11px) center; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; appearance: none; -webkit-appearance: none; }
+.field-project-bar select option { background: var(--bg-2); color: var(--text); }
 .field-project-bar small { color: var(--text-mute); font-size: 11px; }
 .field-layout { display: grid; grid-template-columns: 1fr; gap: 16px; }
 .field-node-list { background: var(--bg-1); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 10px 30px var(--shadow); padding: 10px; align-self: start; }
