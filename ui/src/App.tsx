@@ -12,7 +12,7 @@ import { sizeTransformer } from '../../src/core/calc/transformer';
 import { calcPfCorrection } from '../../src/core/calc/pfCorrection';
 import { calcMotorStarting } from '../../src/core/calc/motorStarting';
 import type { CalcResult } from '../../src/core/domain/trace';
-import { listProjects, createProject, renameProject, deleteProject, getActiveProjectId, setActiveProjectId, type Project } from '../../src/core/persistence/projectStore';
+import { listProjects, createProject, renameProject, deleteProject, getActiveProjectId, setActiveProjectId, updateProjectBranding, type Project, type ProjectBranding } from '../../src/core/persistence/projectStore';
 import { ALLOWED_CHILDREN, NODE_TYPE_LABEL, type NodeType, type OneLineNode } from '../../src/core/domain/node';
 import { listNodesForProject, createNode, updateNodeData, updateNodeResult, renameNode as renameNodeStore, deleteNode as deleteNodeStore } from '../../src/core/persistence/nodeStore';
 import { NODE_TOOLS, resolveParentFaultCurrent, motorChildVa, bomRowsForNode, type FieldDef, type SubTool } from './nodeTools';
@@ -94,6 +94,7 @@ export function App() {
     selectProject(p.id);
   };
   const rename = async (id: string, name: string) => { await renameProject(id, name); setProjects(await listProjects()); };
+  const updateBranding = async (id: string, branding: ProjectBranding) => { await updateProjectBranding(id, branding); setProjects(await listProjects()); };
   const removeProject = async (id: string) => {
     await deleteProject(id);
     let all = await listProjects();
@@ -253,7 +254,7 @@ export function App() {
     const bytes = await generateCalcPackagePdf({
       projectName: activeProject?.name ?? 'Untitled project', nodeName: selectedNode.name, calcLabel: activeSubTool.label,
       engineVersion: onelineResult.engineVersion, generatedAt: new Date(), trace: onelineResult.trace, warnings: onelineResult.warnings, assumptions: onelineResult.assumptions,
-      fieldCheckHistory,
+      fieldCheckHistory, branding: activeProject?.branding,
     });
     downloadBlob(`${selectedNode.name.replace(/\s+/g, '_')}_${activeSubTool.id}.pdf`, new Blob([bytes as BlobPart], { type: 'application/pdf' }));
   };
@@ -271,9 +272,9 @@ export function App() {
     if (!selectedNode || !activeSubTool || !onelineResult || 'error' in onelineResult) return;
     let csv: string;
     if (activeSubTool.id === 'balance') {
-      csv = panelScheduleCsv(panelCircuitsForExport(), onelineResult.result);
+      csv = panelScheduleCsv(panelCircuitsForExport(), onelineResult.result, activeProject?.branding);
     } else {
-      csv = calcTraceCsv(onelineResult);
+      csv = calcTraceCsv(onelineResult, activeProject?.branding);
     }
     const fieldCheckHistory = await fieldCheckHistoryForExport();
     if (fieldCheckHistory.length > 0) csv = `${csv}\n\n${fieldCheckHistoryCsv(fieldCheckHistory)}`;
@@ -287,7 +288,7 @@ export function App() {
       projectName: activeProject?.name ?? 'Untitled project', panelName: selectedNode.name,
       voltage: subData.voltage ? +subData.voltage : undefined, phaseConfig: subData.phaseConfig,
       mainRatingA: subData.mainRatingA ? +subData.mainRatingA : undefined, generatedAt: new Date(),
-      circuits: panelCircuitsForExport(), balance: onelineResult.result,
+      circuits: panelCircuitsForExport(), balance: onelineResult.result, branding: activeProject?.branding,
     });
     downloadBlob(`${selectedNode.name.replace(/\s+/g, '_')}_panel_directory.pdf`, new Blob([bytes as BlobPart], { type: 'application/pdf' }));
   };
@@ -385,7 +386,7 @@ export function App() {
           nodes={nodes} selectedNodeId={fieldSelectedNodeId} onSelectNode={setFieldSelectedNodeId}
         />
       ) : view === 'schedule' ? (
-        <ScheduleView projectName={activeProject?.name ?? 'Untitled project'} nodes={nodes} />
+        <ScheduleView projectName={activeProject?.name ?? 'Untitled project'} nodes={nodes} branding={activeProject?.branding} />
       ) : view === 'workbench' ? <div className="workspace">
         <section className="calculator-card">
           <div className="tool-tabs">{TOOLS.map(t => <button key={t.id} className={tool === t.id ? 'selected' : ''} onClick={() => setTool(t.id)}><t.icon size={17}/> {t.label}</button>)}</div>
@@ -520,7 +521,7 @@ export function App() {
     </main>
     {showAudit && auditResult && <AuditModal result={auditResult} onClose={() => setShowAudit(false)} />}
     {infoPanel && <InfoModal type={infoPanel} onClose={() => setInfoPanel(null)} />}
-    {showProjects && <ProjectsPanel projects={projects} activeId={activeProjectId} onSelect={selectProject} onRename={rename} onDelete={removeProject} onAdd={addProject} onClose={() => setShowProjects(false)} />}
+    {showProjects && <ProjectsPanel projects={projects} activeId={activeProjectId} onSelect={selectProject} onRename={rename} onDelete={removeProject} onAdd={addProject} onUpdateBranding={updateBranding} onClose={() => setShowProjects(false)} />}
   </div>;
 }
 
@@ -641,18 +642,18 @@ function PanelBalanceForm({ subData, children, onChangePhaseConfig, onAddRow, on
  * live, IndexedDB-backed state every other view reads) so it updates as the
  * project changes without a separate fetch or cache of its own.
  */
-function ScheduleView({ projectName, nodes }: { projectName: string; nodes: OneLineNode[] }) {
+function ScheduleView({ projectName, nodes, branding }: { projectName: string; nodes: OneLineNode[]; branding?: ProjectBranding }) {
   const entries: BomEntry[] = nodes
     .slice()
     .sort((a, b) => a.name.localeCompare(b.name))
     .map(n => ({ nodeName: n.name, nodeType: NODE_TYPE_LABEL[n.type], spec: bomRowsForNode(n) }));
 
   const exportCsv = () => {
-    downloadBlob(`${projectName.replace(/\s+/g, '_')}_schedule.csv`, new Blob([bomCsv(entries)], { type: 'text/csv' }));
+    downloadBlob(`${projectName.replace(/\s+/g, '_')}_schedule.csv`, new Blob([bomCsv(entries, branding)], { type: 'text/csv' }));
   };
   const exportPdf = async () => {
     const { generateBomPdf } = await import('../../src/core/report/pdf');
-    const bytes = await generateBomPdf({ projectName, generatedAt: new Date(), entries });
+    const bytes = await generateBomPdf({ projectName, generatedAt: new Date(), entries, branding });
     downloadBlob(`${projectName.replace(/\s+/g, '_')}_schedule.pdf`, new Blob([bytes as BlobPart], { type: 'application/pdf' }));
   };
 
@@ -735,9 +736,10 @@ function WorkbenchResultPanel({ tool, result, onAudit }: { tool: Tool; result: C
 
 // ---------------- Modals ----------------
 
-function ProjectsPanel({ projects, activeId, onSelect, onRename, onDelete, onAdd, onClose }: {
+function ProjectsPanel({ projects, activeId, onSelect, onRename, onDelete, onAdd, onUpdateBranding, onClose }: {
   projects: Project[]; activeId: string | null;
-  onSelect: (id: string) => void; onRename: (id: string, name: string) => void; onDelete: (id: string) => void; onAdd: (name: string) => void; onClose: () => void;
+  onSelect: (id: string) => void; onRename: (id: string, name: string) => void; onDelete: (id: string) => void; onAdd: (name: string) => void;
+  onUpdateBranding: (id: string, branding: ProjectBranding) => void; onClose: () => void;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
@@ -746,6 +748,15 @@ function ProjectsPanel({ projects, activeId, onSelect, onRename, onDelete, onAdd
   const startEdit = (p: Project) => { setEditingId(p.id); setDraft(p.name); };
   const commitEdit = () => { if (editingId) onRename(editingId, draft); setEditingId(null); };
   const submitNew = () => { if (newName.trim()) { onAdd(newName.trim()); setNewName(''); } };
+
+  const activeProject = projects.find(p => p.id === activeId) ?? null;
+  const [firmName, setFirmName] = useState(activeProject?.branding?.firmName ?? '');
+  const [licenseOrContact, setLicenseOrContact] = useState(activeProject?.branding?.licenseOrContact ?? '');
+  useEffect(() => {
+    setFirmName(activeProject?.branding?.firmName ?? '');
+    setLicenseOrContact(activeProject?.branding?.licenseOrContact ?? '');
+  }, [activeId]);
+  const commitBranding = () => { if (activeId) onUpdateBranding(activeId, { firmName, licenseOrContact }); };
 
   return <div className="modal-backdrop" onMouseDown={onClose}>
     <section className="projects-modal" onMouseDown={e => e.stopPropagation()}>
@@ -764,6 +775,15 @@ function ProjectsPanel({ projects, activeId, onSelect, onRename, onDelete, onAdd
         <input placeholder="New project name" value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') submitNew(); }} />
         <button className="calculate" onClick={submitNew}><Plus size={16}/> Add</button>
       </div>
+      {activeProject && <div className="branding-block">
+        <p className="eyebrow">REPORT BRANDING · {activeProject.name}</p>
+        <p className="branding-hint">Applied to this project's PDF/CSV export headers in place of "EE Workbench". Text only — leave blank to use the default.</p>
+        <div className="branding-fields">
+          <Input label="Firm / company name" value={firmName} onChange={setFirmName} type="text" />
+          <Input label="License or contact line" value={licenseOrContact} onChange={setLicenseOrContact} type="text" />
+        </div>
+        <button className="calculate" onClick={commitBranding}>Save branding</button>
+      </div>}
     </section>
   </div>;
 }

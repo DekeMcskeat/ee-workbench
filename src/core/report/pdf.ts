@@ -13,7 +13,7 @@ import { PDFDocument, PDFFont, PDFPage, StandardFonts, rgb } from 'pdf-lib';
 import type { CalcWarning, Assumption, CodeReference, TraceStep } from '../domain/trace';
 import type { FieldCheckHistoryRow } from '../calc/fieldVariance';
 import type { PanelCircuit, PanelBalanceResult } from '../calc/panelBalance';
-import type { BomEntry } from './csv';
+import { brandName, type BomEntry, type ReportBranding } from './csv';
 
 export interface CalcPackageParams {
   projectName: string;
@@ -26,6 +26,8 @@ export interface CalcPackageParams {
   assumptions: Assumption[];
   /** Optional — appended as an additional section, not a separate report, when this node has recorded field-verification measurements. */
   fieldCheckHistory?: FieldCheckHistoryRow[];
+  /** Optional project-level branding — replaces the default "EE Workbench" header when set. */
+  branding?: ReportBranding;
 }
 
 function fmtVariancePct(n: number): string {
@@ -119,9 +121,10 @@ export async function generateCalcPackagePdf(p: CalcPackageParams): Promise<Uint
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
   const w = new PdfWriter(doc, font, bold);
 
-  w.text('EE WORKBENCH — CALCULATION PACKAGE', { size: 16, bold: true, gap: 24 });
+  w.text(`${brandName(p.branding).toUpperCase()} — CALCULATION PACKAGE`, { size: 16, bold: true, gap: 24 });
   w.text(`${p.projectName}  ·  ${p.nodeName}  ·  ${p.calcLabel}`, { size: 11, gap: 16 });
   w.text(`Generated ${p.generatedAt.toLocaleString()}   ·   Engine v${p.engineVersion}   ·   NEC 2023 references (unverified third-party transcription — confirm against your adopted code book)`, { size: 8.5, color: MUTED, gap: 18 });
+  if (p.branding?.licenseOrContact) w.text(p.branding.licenseOrContact, { size: 8.5, color: MUTED, gap: 18 });
   w.rule();
 
   w.text('CALCULATION TRACE', { size: 12, bold: true, gap: 18 });
@@ -185,6 +188,7 @@ export interface PanelDirectoryParams {
   generatedAt: Date;
   circuits: PanelCircuit[];
   balance: PanelBalanceResult;
+  branding?: ReportBranding;
 }
 
 const PHASE_CONFIG_LABEL: Record<'1ph_3w' | '3ph_4w', string> = {
@@ -205,9 +209,10 @@ export async function generatePanelDirectoryPdf(p: PanelDirectoryParams): Promis
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
   const w = new PdfWriter(doc, font, bold);
 
-  w.text('EE WORKBENCH — PANEL DIRECTORY', { size: 16, bold: true, gap: 24 });
+  w.text(`${brandName(p.branding).toUpperCase()} — PANEL DIRECTORY`, { size: 16, bold: true, gap: 24 });
   w.text(`${p.projectName}  ·  ${p.panelName}`, { size: 11, gap: 16 });
   w.text(`Generated ${p.generatedAt.toLocaleString()}`, { size: 8.5, color: MUTED, gap: 18 });
+  if (p.branding?.licenseOrContact) w.text(p.branding.licenseOrContact, { size: 8.5, color: MUTED, gap: 18 });
   w.rule();
 
   w.text('NAMEPLATE', { size: 12, bold: true, gap: 16 });
@@ -253,6 +258,7 @@ export interface BomPdfParams {
   projectName: string;
   generatedAt: Date;
   entries: BomEntry[];
+  branding?: ReportBranding;
 }
 
 /** Project-wide Schedule (bill of materials) — one flat table across every node in the project, from each node's already-cached spec summary (see ui/src/nodeTools.ts's `bomRowsForNode`), not a per-node calc-package export. */
@@ -264,9 +270,10 @@ export async function generateBomPdf(p: BomPdfParams): Promise<Uint8Array> {
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
   const w = new PdfWriter(doc, font, bold);
 
-  w.text('EE WORKBENCH — SCHEDULE / BILL OF MATERIALS', { size: 16, bold: true, gap: 24 });
+  w.text(`${brandName(p.branding).toUpperCase()} — SCHEDULE / BILL OF MATERIALS`, { size: 16, bold: true, gap: 24 });
   w.text(p.projectName, { size: 11, gap: 16 });
   w.text(`Generated ${p.generatedAt.toLocaleString()}`, { size: 8.5, color: MUTED, gap: 18 });
+  if (p.branding?.licenseOrContact) w.text(p.branding.licenseOrContact, { size: 8.5, color: MUTED, gap: 18 });
   w.rule();
 
   if (p.entries.length === 0) {
