@@ -33,6 +33,7 @@ export function calcPfCorrection(input: PfCorrectionInput): CalcResult<PfCorrect
     substitution: `${kw} × (tan(${(theta1 * 180 / Math.PI).toFixed(2)}°) - tan(${(theta2 * 180 / Math.PI).toFixed(2)}°)) = ${kw} × (${Math.tan(theta1).toFixed(4)} - ${Math.tan(theta2).toFixed(4)})`,
     resultValue: kvar,
     resultUnit: 'kVAR',
+    codeRefs: [{ standard: 'NEC', edition: '2023', section: 'Article 460', note: 'Governs capacitor equipment generally — the kVAR sizing formula itself is standard power-engineering trigonometry, not an NEC-tabulated value.' }],
   });
 
   let resonantHarmonicOrder: number | undefined;

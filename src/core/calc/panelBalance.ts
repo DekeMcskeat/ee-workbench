@@ -89,6 +89,7 @@ export function calcPanelBalance(input: PanelBalanceInput): CalcResult<PanelBala
     substitution: activePhases.map(p => `${p}=${phaseVa[p].toFixed(0)}VA`).join(', '),
     resultValue: totalVa,
     resultUnit: 'VA',
+    codeRefs: [{ standard: 'NEC', edition: '2023', section: 'Article 408', note: 'Panelboards are governed by Article 408; the numeric imbalance% threshold below is engineering practice, not an NEC-mandated value — see the trace step below.' }],
   });
   trace.push({
     step: 'Phase imbalance',
@@ -113,6 +114,6 @@ export function calcPanelBalance(input: PanelBalanceInput): CalcResult<PanelBala
     result: { phaseVa, totalVa, averageVa, maxPhase, minPhase, imbalancePct },
     warnings,
     assumptions,
-    codeRefs: [],
+    codeRefs: [{ standard: 'NEC', edition: '2023', section: 'Article 408' }],
   };
 }
