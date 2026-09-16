@@ -59,6 +59,11 @@ export interface FieldCheckConfig {
   computeVariance: (design: CalcResult<any>, fieldCheck: FieldCheck | null | undefined, subData: Record<string, any>) => CalcResult<VarianceResult>;
 }
 
+export interface BomRow {
+  label: string;
+  value: string;
+}
+
 export interface SubTool {
   id: string;
   label: string;
@@ -73,6 +78,20 @@ export interface SubTool {
   rows: (result: any) => { label: string; value: string }[];
   /** Present only for sub-tools a field engineer can practically re-measure and compare (see FieldCheckConfig). */
   fieldCheck?: FieldCheckConfig;
+  /**
+   * Declares this sub-tool as the one that represents its node type on the
+   * project-wide Schedule (bill of materials) rollup — a short,
+   * type-appropriate spec summary (e.g. a transformer's kVA/voltage, a
+   * feeder's chosen size/OCPD). Only one sub-tool per node type should
+   * declare this. Takes the node's already-persisted `data`/`result` — the
+   * rollup never re-invokes a calc function — so implementations must
+   * tolerate `result` being null (nothing computed yet) or belonging to a
+   * different sub-tool of the same node (this app caches only the most
+   * recently *viewed* sub-tool's result per node, not one slot per
+   * sub-tool) by checking for the specific fields they expect rather than
+   * assuming shape.
+   */
+  bomRow?: (ctx: { data: Record<string, any>; result: any }) => BomRow[];
 }
 
 /** Wraps plain entered/derived values into a CalcResult so every node type — even ones with no real "calculation" — shares the same audit-trail UI. */
@@ -148,6 +167,10 @@ const utilityTool: SubTool = {
   ),
   metric: (r) => ({ value: r.availableFaultCurrentA.toLocaleString(), unit: 'A', label: 'available fault current' }),
   rows: (r) => [{ label: 'Source voltage', value: `${r.sourceVoltage} V` }],
+  bomRow: ({ result }) => [
+    { label: 'Voltage', value: typeof result?.sourceVoltage === 'number' ? `${result.sourceVoltage} V` : 'not yet calculated' },
+    { label: 'Available fault current', value: typeof result?.availableFaultCurrentA === 'number' ? `${result.availableFaultCurrentA.toLocaleString()} A` : 'not yet calculated' },
+  ],
 };
 
 const transformerTool: SubTool = {
@@ -163,6 +186,13 @@ const transformerTool: SubTool = {
   run: (data) => sizeTransformer({ kva: +data.kva, primaryVoltage: +data.primaryVoltage, secondaryVoltage: +data.secondaryVoltage, phase: data.phase, percentZ: +data.percentZ }),
   metric: (r) => ({ value: r.secondaryAvailableFaultCurrent.toFixed(0), unit: 'A', label: 'secondary available fault current' }),
   rows: (r) => [{ label: 'Primary FLA', value: `${r.primaryFla.toFixed(2)} A` }, { label: 'Secondary FLA', value: `${r.secondaryFla.toFixed(1)} A` }],
+  // kVA/voltage are the transformer's entered nameplate spec — not part of
+  // TransformerSizingResult (which only carries computed FLA/fault-current
+  // values) — so this reads the node's persisted input data instead.
+  bomRow: ({ data }) => [
+    { label: 'Rating', value: `${data.kva} kVA` },
+    { label: 'Voltage', value: `${data.primaryVoltage}/${data.secondaryVoltage} V` },
+  ],
 };
 
 const panelLoadTool: SubTool = {
@@ -206,6 +236,14 @@ const panelBalanceTool: SubTool = {
   },
   metric: (r) => ({ value: r.imbalancePct.toFixed(1), unit: '%', label: 'phase imbalance', danger: r.imbalancePct > 20 }),
   rows: (r) => [{ label: 'Phase A', value: `${r.phaseVa.A.toFixed(0)} VA` }, { label: 'Phase B', value: `${r.phaseVa.B.toFixed(0)} VA` }, { label: 'Phase C', value: `${r.phaseVa.C.toFixed(0)} VA` }],
+  // phaseConfig is a design input (always available); imbalancePct is a
+  // computed result that may be stale/absent if the node's cached .result
+  // currently belongs to this panel's other sub-tool (Load calc) instead —
+  // see the SubTool.bomRow doc comment.
+  bomRow: ({ data, result }) => [
+    { label: 'Configuration', value: data.phaseConfig === '1ph_3w' ? '1φ, 3-wire' : '3φ, 4-wire' },
+    { label: 'Phase imbalance', value: typeof result?.imbalancePct === 'number' ? `${result.imbalancePct.toFixed(1)}%` : 'not yet calculated' },
+  ],
   fieldCheck: {
     fields: [
       { key: 'currentA', label: 'Measured current — Phase A', suffix: 'A' },
@@ -245,6 +283,10 @@ const feederConductorTool: SubTool = {
   }),
   metric: (r) => ({ value: r.chosenSize, unit: +r.chosenSize > 4 ? 'kcmil' : 'AWG', label: `chosen size · ${r.iterations} iteration${r.iterations === 1 ? '' : 's'}` }),
   rows: (r) => [{ label: 'Design current', value: `${r.designCurrent.toFixed(1)} A` }, { label: 'Final ampacity', value: `${r.finalAmpacity.toFixed(1)} A` }, { label: '%VD (exact)', value: `${r.pctVdExact.toFixed(2)}%` }, { label: 'EGC size', value: r.egcSize }, { label: 'OCPD', value: `${r.ocpdSize} A` }],
+  bomRow: ({ result }) => [
+    { label: 'Conductor size', value: typeof result?.chosenSize === 'string' ? `${result.chosenSize} ${+result.chosenSize > 4 ? 'kcmil' : 'AWG'}` : 'not yet calculated' },
+    { label: 'OCPD', value: typeof result?.ocpdSize === 'number' ? `${result.ocpdSize} A` : 'not yet calculated' },
+  ],
   fieldCheck: {
     fields: [{ key: 'pctVd', label: 'Measured voltage drop', suffix: '%' }],
     computeVariance: (design, fieldCheck) => calcFeederVoltageDropVariance(design, fieldCheck),
@@ -312,6 +354,10 @@ const motorTool: SubTool = {
   }),
   metric: (r) => ({ value: r.terminalVoltageDipPct.toFixed(2), unit: '%', label: 'terminal starting dip', danger: r.terminalVoltageDipPct > 15 }),
   rows: (r) => [{ label: 'FLC', value: `${r.flc.toFixed(1)} A` }, { label: `LRA (${r.lraSource.replace(/_/g, ' ')})`, value: `${r.lra.toFixed(1)} A` }, { label: 'Actual starting current', value: `${r.actualStartingCurrent.toFixed(1)} A` }, { label: 'Bus dip', value: `${r.busVoltageDipPct.toFixed(2)}%` }],
+  // HP/voltage are the motor's entered nameplate spec — MotorStartingResult
+  // doesn't echo them back (only computed FLC/LRA/dip values), so this
+  // reads the node's persisted input data instead.
+  bomRow: ({ data }) => [{ label: 'Rating', value: `${data.hp} HP, ${data.voltage} V` }],
 };
 
 const loadBranchTool: SubTool = {
@@ -330,6 +376,7 @@ const loadBranchTool: SubTool = {
   ),
   metric: (r) => ({ value: r.va.toFixed(0), unit: 'VA', label: 'branch load' }),
   rows: (r) => [{ label: 'Phase tap', value: r.tap }, { label: 'Continuous', value: r.continuous ? 'Yes' : 'No' }, { label: 'Breaker/OCPD', value: r.breakerA ? `${r.breakerA} A` : 'not entered' }],
+  bomRow: ({ result }) => [{ label: 'Load', value: typeof result?.va === 'number' ? `${result.va.toFixed(0)} VA` : 'not yet calculated' }],
 };
 
 export const NODE_TOOLS: Record<NodeType, SubTool[]> = {
@@ -340,3 +387,36 @@ export const NODE_TOOLS: Record<NodeType, SubTool[]> = {
   motor: [motorTool],
   load: [loadBranchTool],
 };
+
+/**
+ * The Schedule (bill of materials) row for a given sub-tool list + a node's
+ * persisted data/result — split out from `bomRowsForNode` so it's testable
+ * against a hand-built tool list (e.g. one with no `bomRow`-declaring
+ * sub-tool at all) without needing a real NodeType/NODE_TOOLS entry.
+ */
+export function bomRowFromTools(tools: SubTool[], rawData: Record<string, unknown> | undefined, result: unknown): BomRow[] {
+  const target = tools.find(t => t.bomRow);
+  if (!target) return [];
+  const isNamespaced = tools.length > 1;
+  const scoped = isNamespaced ? (rawData as any)?.[target.id] : rawData;
+  const data = { ...target.defaultData, ...(scoped ?? {}) };
+  try {
+    return target.bomRow!({ data, result });
+  } catch {
+    // A bomRow implementation should already tolerate a null/mismatched
+    // result, but a malformed legacy node's data shouldn't take down the
+    // whole Schedule view.
+    return [];
+  }
+}
+
+/**
+ * A node's Schedule (bill of materials) row — the sub-tool that declares
+ * `bomRow` for this node type, run against the node's already-persisted
+ * data/result (never recomputed). Returns `[]` for a node type with no
+ * `bomRow`-declaring sub-tool, so the Schedule view can show a graceful
+ * placeholder instead of a blank crash.
+ */
+export function bomRowsForNode(node: OneLineNode): BomRow[] {
+  return bomRowFromTools(NODE_TOOLS[node.type], node.data as any, node.result);
+}

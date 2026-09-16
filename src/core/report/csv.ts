@@ -30,6 +30,22 @@ export function fieldCheckHistoryCsv(rows: FieldCheckHistoryRow[]): string {
   return `FIELD VERIFICATION HISTORY\n${Papa.unparse(table)}`;
 }
 
+/** One row of the project-wide Schedule (bill of materials) rollup — see App.tsx's Schedule view and ui/src/nodeTools.ts's `bomRowsForNode`. */
+export interface BomEntry {
+  nodeName: string;
+  nodeType: string;
+  spec: { label: string; value: string }[];
+}
+
+export function bomCsv(entries: BomEntry[]): string {
+  const rows = entries.map(e => ({
+    Node: e.nodeName,
+    Type: e.nodeType,
+    Spec: e.spec.map(s => `${s.label}: ${s.value}`).join('; '),
+  }));
+  return Papa.unparse(rows);
+}
+
 export function calcTraceCsv(result: CalcResult<unknown>): string {
   const rows = result.trace.map((s, i) => ({
     'Step #': i + 1,

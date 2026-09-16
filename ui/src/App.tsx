@@ -15,9 +15,9 @@ import type { CalcResult } from '../../src/core/domain/trace';
 import { listProjects, createProject, renameProject, deleteProject, getActiveProjectId, setActiveProjectId, type Project } from '../../src/core/persistence/projectStore';
 import { ALLOWED_CHILDREN, NODE_TYPE_LABEL, type NodeType, type OneLineNode } from '../../src/core/domain/node';
 import { listNodesForProject, createNode, updateNodeData, updateNodeResult, renameNode as renameNodeStore, deleteNode as deleteNodeStore } from '../../src/core/persistence/nodeStore';
-import { NODE_TOOLS, resolveParentFaultCurrent, motorChildVa, type FieldDef, type SubTool } from './nodeTools';
+import { NODE_TOOLS, resolveParentFaultCurrent, motorChildVa, bomRowsForNode, type FieldDef, type SubTool } from './nodeTools';
 import type { PanelCircuit } from '../../src/core/calc/panelBalance';
-import { panelScheduleCsv, calcTraceCsv, fieldCheckHistoryCsv } from '../../src/core/report/csv';
+import { panelScheduleCsv, calcTraceCsv, fieldCheckHistoryCsv, bomCsv, type BomEntry } from '../../src/core/report/csv';
 import type { FieldCheckHistoryRow } from '../../src/core/calc/fieldVariance';
 import { listFieldChecksForNode } from '../../src/core/persistence/fieldCheckStore';
 import { sizes, allSizes, motorVoltages, tempRatings, materials } from './constants';
@@ -28,7 +28,7 @@ import { FieldView } from './FieldView';
 import { fieldViewHash, shortNodeRef, parseFieldViewHash, findNodeByShortRef } from './nodeRef';
 
 type Tool = 'voltage' | 'conduit' | 'conductor' | 'load' | 'transformer' | 'pf' | 'motor';
-type View = 'workbench' | 'oneline' | 'field';
+type View = 'workbench' | 'oneline' | 'field' | 'schedule';
 
 const TOOLS: { id: Tool; label: string; icon: typeof Gauge; eyebrow: string; blurb: string }[] = [
   { id: 'voltage', label: 'Voltage drop', icon: Gauge, eyebrow: 'CHAPTER 9 · TABLE 9', blurb: 'Two-method %VD check against a project target.' },
@@ -364,6 +364,7 @@ export function App() {
         <button className={`nav-item ${view === 'oneline' ? 'active' : ''}`} onClick={() => setView('oneline')}><Network size={18}/>{railOpen && 'One-line'}</button>
         <button className={`nav-item ${view === 'workbench' ? 'active' : ''}`} onClick={() => setView('workbench')}><Gauge size={18}/>{railOpen && 'Workbench'}</button>
         <button className={`nav-item ${view === 'field' ? 'active' : ''}`} onClick={() => setView('field')}><ClipboardCheck size={18}/>{railOpen && 'Field'}</button>
+        <button className={`nav-item ${view === 'schedule' ? 'active' : ''}`} onClick={() => setView('schedule')}><Table2 size={18}/>{railOpen && 'Schedule'}</button>
         <button className="nav-item" onClick={() => setShowProjects(true)}><FileText size={18}/>{railOpen && 'Projects'}</button>
         <button className="nav-item" onClick={() => setInfoPanel('standards')}><BookOpen size={18}/>{railOpen && 'Standards'}</button>
       </nav>
@@ -373,7 +374,7 @@ export function App() {
     <main>
       <header><button className="crumb" onClick={() => setShowProjects(true)}><span>Project</span><b>{activeProject?.name ?? '—'}</b><ChevronDown size={15}/></button><div className="header-actions"><button className="icon-button" aria-label="Help" onClick={() => setInfoPanel('help')}><CircleHelp size={18}/></button><div className="avatar">JA</div></div></header>
       <section className="context">
-        <div><p className="eyebrow">{view === 'oneline' ? 'ONE-LINE PROJECT' : view === 'field' ? 'FIELD VERIFICATION' : 'QUICK WORKBENCH'}</p><h1>{view === 'oneline' ? <>Design as a <i>connected system.</i></> : view === 'field' ? <>Verify the design <i>against reality.</i></> : <>Electrical calculations, <i>defensible by design.</i></>}</h1><p className="subhead">{view === 'oneline' ? 'Build a one-line hierarchy — every node keeps its own inputs, results, and audit trail, with fault current and panel loading flowing between linked nodes.' : view === 'field' ? 'Record what was actually measured at a panel or feeder and compare it against the office design — design data is never overwritten from here.' : 'Every result is paired with its inputs, code references, and a transparent calculation trail.'}</p></div>
+        <div><p className="eyebrow">{view === 'oneline' ? 'ONE-LINE PROJECT' : view === 'field' ? 'FIELD VERIFICATION' : view === 'schedule' ? 'PROJECT SCHEDULE' : 'QUICK WORKBENCH'}</p><h1>{view === 'oneline' ? <>Design as a <i>connected system.</i></> : view === 'field' ? <>Verify the design <i>against reality.</i></> : view === 'schedule' ? <>Every node, <i>one flat schedule.</i></> : <>Electrical calculations, <i>defensible by design.</i></>}</h1><p className="subhead">{view === 'oneline' ? 'Build a one-line hierarchy — every node keeps its own inputs, results, and audit trail, with fault current and panel loading flowing between linked nodes.' : view === 'field' ? 'Record what was actually measured at a panel or feeder and compare it against the office design — design data is never overwritten from here.' : view === 'schedule' ? 'A project-wide bill of materials rolled up live from every node\'s already-computed result — nothing here is recalculated.' : 'Every result is paired with its inputs, code references, and a transparent calculation trail.'}</p></div>
         {view === 'workbench' && <button className="new-button" onClick={resetAll}><Plus size={18}/> New calculation</button>}
       </section>
       <div className="source-banner"><AlertTriangle size={17}/><span><b>Review table sources before issuing.</b> NEC values are cross-verified transcriptions and must be confirmed against your adopted code book.</span><button onClick={() => setShowAudit(true)}>Review status <ArrowUpRight size={14}/></button></div>
@@ -383,6 +384,8 @@ export function App() {
           projects={projects} activeProjectId={activeProjectId} onSelectProject={selectProject}
           nodes={nodes} selectedNodeId={fieldSelectedNodeId} onSelectNode={setFieldSelectedNodeId}
         />
+      ) : view === 'schedule' ? (
+        <ScheduleView projectName={activeProject?.name ?? 'Untitled project'} nodes={nodes} />
       ) : view === 'workbench' ? <div className="workspace">
         <section className="calculator-card">
           <div className="tool-tabs">{TOOLS.map(t => <button key={t.id} className={tool === t.id ? 'selected' : ''} onClick={() => setTool(t.id)}><t.icon size={17}/> {t.label}</button>)}</div>
@@ -627,6 +630,52 @@ function PanelBalanceForm({ subData, children, onChangePhaseConfig, onAddRow, on
       </table>
       <button type="button" className="calculate" style={{ marginTop: 10 }} onClick={onAddRow}><Plus size={14}/> Add manual circuit</button>
     </div>
+  </div>;
+}
+
+// ---------------- Schedule (bill of materials) ----------------
+
+/**
+ * A project-wide rollup — one flat row per node, from each node's own
+ * declared `bomRow` sub-tool (see nodeTools.ts), read from `nodes` (the same
+ * live, IndexedDB-backed state every other view reads) so it updates as the
+ * project changes without a separate fetch or cache of its own.
+ */
+function ScheduleView({ projectName, nodes }: { projectName: string; nodes: OneLineNode[] }) {
+  const entries: BomEntry[] = nodes
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(n => ({ nodeName: n.name, nodeType: NODE_TYPE_LABEL[n.type], spec: bomRowsForNode(n) }));
+
+  const exportCsv = () => {
+    downloadBlob(`${projectName.replace(/\s+/g, '_')}_schedule.csv`, new Blob([bomCsv(entries)], { type: 'text/csv' }));
+  };
+  const exportPdf = async () => {
+    const { generateBomPdf } = await import('../../src/core/report/pdf');
+    const bytes = await generateBomPdf({ projectName, generatedAt: new Date(), entries });
+    downloadBlob(`${projectName.replace(/\s+/g, '_')}_schedule.pdf`, new Blob([bytes as BlobPart], { type: 'application/pdf' }));
+  };
+
+  return <div className="schedule-view">
+    <section className="calculator-card">
+      <div className="card-heading">
+        <div><p className="eyebrow">BILL OF MATERIALS</p><h2>{projectName}</h2><p>{entries.length} node{entries.length === 1 ? '' : 's'} in this project.</p></div>
+        {entries.length > 0 && <div className="export-row schedule-export-row">
+          <button className="export-btn" onClick={exportPdf}><FileDown size={15}/> PDF</button>
+          <button className="export-btn" onClick={exportCsv}><Table2 size={15}/> CSV</button>
+        </div>}
+      </div>
+      {entries.length === 0 ? <div className="empty-state"><Table2 size={28}/><p>No nodes in this project yet — build a one-line first.</p></div> : (
+        <table className="mini-table schedule-table">
+          <thead><tr><th>Node</th><th>Type</th><th>Spec</th></tr></thead>
+          <tbody>{entries.map((e, i) => <tr key={i}>
+            <td>{e.nodeName}</td>
+            <td>{e.nodeType}</td>
+            <td>{e.spec.length ? e.spec.map(s => `${s.label}: ${s.value}`).join(' · ') : <span className="muted">no spec available</span>}</td>
+          </tr>)}</tbody>
+        </table>
+      )}
+    </section>
   </div>;
 }
 

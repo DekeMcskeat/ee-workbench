@@ -13,6 +13,7 @@ import { PDFDocument, PDFFont, PDFPage, StandardFonts, rgb } from 'pdf-lib';
 import type { CalcWarning, Assumption, CodeReference, TraceStep } from '../domain/trace';
 import type { FieldCheckHistoryRow } from '../calc/fieldVariance';
 import type { PanelCircuit, PanelBalanceResult } from '../calc/panelBalance';
+import type { BomEntry } from './csv';
 
 export interface CalcPackageParams {
   projectName: string;
@@ -244,6 +245,47 @@ export async function generatePanelDirectoryPdf(p: PanelDirectoryParams): Promis
 
   w.rule();
   w.text('Design-aid summary generated from the office calculation — confirm against the physically installed panel before taping inside the enclosure.', { size: 8, color: MUTED, gap: 12 });
+
+  return doc.save();
+}
+
+export interface BomPdfParams {
+  projectName: string;
+  generatedAt: Date;
+  entries: BomEntry[];
+}
+
+/** Project-wide Schedule (bill of materials) — one flat table across every node in the project, from each node's already-cached spec summary (see ui/src/nodeTools.ts's `bomRowsForNode`), not a per-node calc-package export. */
+export async function generateBomPdf(p: BomPdfParams): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  doc.setTitle(`${p.projectName} — Schedule / Bill of Materials`);
+  doc.setProducer('EE Workbench');
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const w = new PdfWriter(doc, font, bold);
+
+  w.text('EE WORKBENCH — SCHEDULE / BILL OF MATERIALS', { size: 16, bold: true, gap: 24 });
+  w.text(p.projectName, { size: 11, gap: 16 });
+  w.text(`Generated ${p.generatedAt.toLocaleString()}`, { size: 8.5, color: MUTED, gap: 18 });
+  w.rule();
+
+  if (p.entries.length === 0) {
+    w.text('No nodes in this project yet.', { size: 10, color: MUTED });
+    return doc.save();
+  }
+
+  w.row([
+    { text: 'Node', width: 170, bold: true },
+    { text: 'Type', width: 110, bold: true },
+    { text: 'Spec', width: 230, bold: true },
+  ], { color: MUTED });
+  for (const e of p.entries) {
+    w.row([
+      { text: e.nodeName, width: 170 },
+      { text: e.nodeType, width: 110 },
+      { text: e.spec.length ? e.spec.map(s => `${s.label}: ${s.value}`).join('; ') : 'no spec available', width: 230 },
+    ]);
+  }
 
   return doc.save();
 }
