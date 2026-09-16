@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, ArrowUpRight, BookOpen, Cable, ChevronDown, ChevronRight, CircleHelp, ClipboardCheck, FileDown, FileText,
-  Gauge, Layers3, Lightbulb, Menu, Network, PanelLeftClose, Pencil, Plug, Plus, RotateCw,
-  Settings2, Sparkles, Activity, Table2, Trash2, Zap, Building2, X,
+  Gauge, Layers3, Lightbulb, Menu, Moon, Network, PanelLeftClose, Pencil, Plug, Plus, RotateCw,
+  Settings2, Sparkles, Activity, Sun, Table2, Trash2, Zap, Building2, X,
 } from 'lucide-react';
 import { calcVoltageDrop } from '../../src/core/calc/voltageDrop';
 import { calcConduitFill } from '../../src/core/calc/conduitFill';
@@ -51,7 +51,20 @@ const xfmrDefault = { kva: '1000', primaryVoltage: '13800', secondaryVoltage: '4
 const pfDefault = { kw: '500', existingPf: '0.80', targetPf: '0.95', kvaScAtBus: '15000' };
 const motorDefault = { hp: '50', voltage: '460', lraSource: 'design_letter', nameplateLra: '', nemaDesignLetter: 'B', startingMethod: 'DOL', currentLimitMultipleOfFlc: '4', sourceAvailableFaultCurrentA: '25000', feederMaterial: 'Cu', feederSize: '1/0', lengthFt: '100', conduitMagnetic: 'true', conductorOperatingTempC: '75', parallelSets: '1' };
 
+type Theme = 'dark' | 'light';
+
 export function App() {
+  // The inline script in index.html already set document.documentElement.dataset.theme
+  // before first paint (saved localStorage choice, else OS preference, else dark) —
+  // this just reads that back into React state so the toggle button reflects it.
+  const [theme, setTheme] = useState<Theme>(() => (document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'));
+  const toggleTheme = () => {
+    const next: Theme = theme === 'dark' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem('theme', next); } catch { /* localStorage unavailable — theme still applies for this session */ }
+    setTheme(next);
+  };
+
   const [view, setView] = useState<View>('oneline');
   const [tool, setTool] = useState<Tool>('voltage');
   const [railOpen, setRailOpen] = useState(true);
@@ -373,7 +386,7 @@ export function App() {
       <button className="collapse" onClick={() => setRailOpen(!railOpen)}>{railOpen ? <PanelLeftClose size={18}/> : <Menu size={18}/>} {railOpen && 'Collapse sidebar'}</button>
     </aside>
     <main>
-      <header><button className="crumb" onClick={() => setShowProjects(true)}><span>Project</span><b>{activeProject?.name ?? '—'}</b><ChevronDown size={15}/></button><div className="header-actions"><button className="icon-button" aria-label="Help" onClick={() => setInfoPanel('help')}><CircleHelp size={18}/></button><div className="avatar">JA</div></div></header>
+      <header><button className="crumb" onClick={() => setShowProjects(true)}><span>Project</span><b>{activeProject?.name ?? '—'}</b><ChevronDown size={15}/></button><div className="header-actions"><button className="icon-button" aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} onClick={toggleTheme}>{theme === 'dark' ? <Sun size={18}/> : <Moon size={18}/>}</button><button className="icon-button" aria-label="Help" onClick={() => setInfoPanel('help')}><CircleHelp size={18}/></button><div className="avatar">JA</div></div></header>
       <section className="context">
         <div><p className="eyebrow">{view === 'oneline' ? 'ONE-LINE PROJECT' : view === 'field' ? 'FIELD VERIFICATION' : view === 'schedule' ? 'PROJECT SCHEDULE' : 'QUICK WORKBENCH'}</p><h1>{view === 'oneline' ? <>Design as a <i>connected system.</i></> : view === 'field' ? <>Verify the design <i>against reality.</i></> : view === 'schedule' ? <>Every node, <i>one flat schedule.</i></> : <>Electrical calculations, <i>defensible by design.</i></>}</h1><p className="subhead">{view === 'oneline' ? 'Build a one-line hierarchy — every node keeps its own inputs, results, and audit trail, with fault current and panel loading flowing between linked nodes.' : view === 'field' ? 'Record what was actually measured at a panel or feeder and compare it against the office design — design data is never overwritten from here.' : view === 'schedule' ? 'A project-wide bill of materials rolled up live from every node\'s already-computed result — nothing here is recalculated.' : 'Every result is paired with its inputs, code references, and a transparent calculation trail.'}</p></div>
         {view === 'workbench' && <button className="new-button" onClick={resetAll}><Plus size={18}/> New calculation</button>}
