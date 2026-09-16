@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, ArrowUpRight, BookOpen, Cable, ChevronDown, ChevronRight, CircleHelp, ClipboardCheck, FileDown, FileText,
-  Gauge, Info, Layers3, Lightbulb, Menu, Network, OctagonAlert, PanelLeftClose, Pencil, Plug, Plus, RotateCw,
+  Gauge, Layers3, Lightbulb, Menu, Network, PanelLeftClose, Pencil, Plug, Plus, RotateCw,
   Settings2, Sparkles, Activity, Table2, Trash2, Zap, Building2, X,
 } from 'lucide-react';
 import { calcVoltageDrop } from '../../src/core/calc/voltageDrop';
@@ -11,19 +11,24 @@ import { calcLoad } from '../../src/core/calc/loadCalc';
 import { sizeTransformer } from '../../src/core/calc/transformer';
 import { calcPfCorrection } from '../../src/core/calc/pfCorrection';
 import { calcMotorStarting } from '../../src/core/calc/motorStarting';
-import type { CalcResult, CalcWarning, Assumption } from '../../src/core/domain/trace';
+import type { CalcResult } from '../../src/core/domain/trace';
 import { listProjects, createProject, renameProject, deleteProject, getActiveProjectId, setActiveProjectId, type Project } from '../../src/core/persistence/projectStore';
 import { ALLOWED_CHILDREN, NODE_TYPE_LABEL, type NodeType, type OneLineNode } from '../../src/core/domain/node';
 import { listNodesForProject, createNode, updateNodeData, updateNodeResult, renameNode as renameNodeStore, deleteNode as deleteNodeStore } from '../../src/core/persistence/nodeStore';
-import { NODE_TOOLS, resolveParentFaultCurrent, type FieldDef, type SubTool } from './nodeTools';
+import { NODE_TOOLS, resolveParentFaultCurrent, motorChildVa, type FieldDef, type SubTool } from './nodeTools';
 import type { PanelCircuit } from '../../src/core/calc/panelBalance';
-import { panelScheduleCsv, calcTraceCsv } from '../../src/core/report/csv';
+import { panelScheduleCsv, calcTraceCsv, fieldCheckHistoryCsv } from '../../src/core/report/csv';
+import type { FieldCheckHistoryRow } from '../../src/core/calc/fieldVariance';
+import { listFieldChecksForNode } from '../../src/core/persistence/fieldCheckStore';
 import { sizes, allSizes, motorVoltages, tempRatings, materials } from './constants';
 import { presentError, fmt, hasNonFiniteNumber, InputValidationError, type PresentedError } from './errorPresentation';
 import { firstInvalidNumericField } from './nodeTools';
+import { Input, Select, downloadBlob, ErrorState, WARNING_STYLE, AuditModal } from './uiKit';
+import { FieldView } from './FieldView';
+import { fieldViewHash, shortNodeRef, parseFieldViewHash, findNodeByShortRef } from './nodeRef';
 
 type Tool = 'voltage' | 'conduit' | 'conductor' | 'load' | 'transformer' | 'pf' | 'motor';
-type View = 'workbench' | 'oneline';
+type View = 'workbench' | 'oneline' | 'field';
 
 const TOOLS: { id: Tool; label: string; icon: typeof Gauge; eyebrow: string; blurb: string }[] = [
   { id: 'voltage', label: 'Voltage drop', icon: Gauge, eyebrow: 'CHAPTER 9 · TABLE 9', blurb: 'Two-method %VD check against a project target.' },
@@ -37,21 +42,6 @@ const TOOLS: { id: Tool; label: string; icon: typeof Gauge; eyebrow: string; blu
 
 const NODE_TYPE_ICON: Record<NodeType, typeof Gauge> = { utility: Plug, transformer: Zap, panel: Building2, feeder: Cable, motor: RotateCw, load: Lightbulb };
 const PHASE_TAPS = ['A', 'B', 'C', 'AB', 'BC', 'CA', 'ABC'];
-
-const Input = ({ label, suffix, value, onChange, type = 'number' }: { label: string; suffix?: string; value: string | number; onChange: (v: string) => void; type?: string }) => (
-  <label className="field"><span>{label}</span><div className="input-shell"><input type={type} value={value} onChange={e => onChange(e.target.value)} />{suffix && <em>{suffix}</em>}</div></label>
-);
-const Select = ({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: { value: string; label: string }[] }) => (
-  <label className="field"><span>{label}</span><div className="select-shell"><select value={value} onChange={e => onChange(e.target.value)}>{options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select></div></label>
-);
-
-function downloadBlob(filename: string, blob: Blob) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = filename;
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
 
 const vdDefault = { size: '4', material: 'Cu', ampacityDesignCurrent: '85', lengthFt: '180', phase: '3ph', conduitMagnetic: 'false', powerFactor: '.9', nominalVoltage: '480', conductorOperatingTempC: '75', parallelSets: '1', targetPctVd: '3' };
 const fillDefault = { size: '3', count: '6', tradeSize: '1-1/2', isNipple: false };
@@ -73,28 +63,41 @@ export function App() {
   const [activeProjectId, setActiveProjectIdState] = useState<string | null>(null);
 
   useEffect(() => {
-    let all = listProjects();
-    if (all.length === 0) all = [createProject('Untitled Project')];
-    const storedActive = getActiveProjectId();
-    const active = (storedActive && all.find(p => p.id === storedActive)) ? storedActive : all[0].id;
-    setActiveProjectId(active);
-    setProjects(all);
-    setActiveProjectIdState(active);
+    // Guarded against React StrictMode's dev-mode double-invoke: without the
+    // `cancelled` checks, two concurrent effect runs can each see zero
+    // projects and both call createProject(), producing two "Untitled
+    // Project" rows. Each check runs right after the preceding await so the
+    // superseded run bails out before its next persistence call, not just
+    // before its final setState.
+    let cancelled = false;
+    (async () => {
+      let all = await listProjects();
+      if (cancelled) return;
+      if (all.length === 0) all = [await createProject('Untitled Project')];
+      if (cancelled) return;
+      const storedActive = await getActiveProjectId();
+      if (cancelled) return;
+      const active = (storedActive && all.find(p => p.id === storedActive)) ? storedActive : all[0].id;
+      void setActiveProjectId(active);
+      setProjects(all);
+      setActiveProjectIdState(active);
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   const activeProject = projects.find(p => p.id === activeProjectId) ?? null;
 
-  const selectProject = (id: string) => { setActiveProjectId(id); setActiveProjectIdState(id); };
-  const addProject = (name: string) => {
-    const p = createProject(name || `Project ${projects.length + 1}`);
-    setProjects(listProjects());
+  const selectProject = (id: string) => { void setActiveProjectId(id); setActiveProjectIdState(id); };
+  const addProject = async (name: string) => {
+    const p = await createProject(name || `Project ${projects.length + 1}`);
+    setProjects(await listProjects());
     selectProject(p.id);
   };
-  const rename = (id: string, name: string) => { renameProject(id, name); setProjects(listProjects()); };
-  const removeProject = (id: string) => {
-    deleteProject(id);
-    let all = listProjects();
-    if (all.length === 0) all = [createProject('Untitled Project')];
+  const rename = async (id: string, name: string) => { await renameProject(id, name); setProjects(await listProjects()); };
+  const removeProject = async (id: string) => {
+    await deleteProject(id);
+    let all = await listProjects();
+    if (all.length === 0) all = [await createProject('Untitled Project')];
     setProjects(all);
     if (activeProjectId === id) selectProject(all[0].id);
   };
@@ -107,15 +110,38 @@ export function App() {
   const [addingUnder, setAddingUnder] = useState<string | null>(null);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [nodeEditDraft, setNodeEditDraft] = useState('');
+  const [fieldSelectedNodeId, setFieldSelectedNodeId] = useState<string | null>(null);
+
+  // Deep link support: a "#field/<shortRef>" hash (see ui/src/nodeRef.ts) —
+  // e.g. from a QR code or a link shared with a field engineer — jumps
+  // straight to that node's Field view once it's loaded. Re-runs on `nodes`
+  // changes so a hash present before the project finishes loading still
+  // resolves once it does.
+  useEffect(() => {
+    function applyHash() {
+      const ref = parseFieldViewHash(window.location.hash);
+      if (!ref) return;
+      const node = findNodeByShortRef(nodes, ref);
+      if (node) { setView('field'); setFieldSelectedNodeId(node.id); }
+    }
+    applyHash();
+    window.addEventListener('hashchange', applyHash);
+    return () => window.removeEventListener('hashchange', applyHash);
+  }, [nodes]);
 
   useEffect(() => {
     if (!activeProjectId) return;
-    const ns = listNodesForProject(activeProjectId);
-    setNodes(ns);
-    const root = ns.find(n => n.parentId === null);
-    setSelectedNodeId(root ? root.id : (ns[0]?.id ?? null));
-    setExpanded(new Set(ns.filter(n => n.parentId === null).map(n => n.id)));
-    setSubToolId(null);
+    let cancelled = false;
+    (async () => {
+      const ns = await listNodesForProject(activeProjectId);
+      if (cancelled) return;
+      setNodes(ns);
+      const root = ns.find(n => n.parentId === null);
+      setSelectedNodeId(root ? root.id : (ns[0]?.id ?? null));
+      setExpanded(new Set(ns.filter(n => n.parentId === null).map(n => n.id)));
+      setSubToolId(null);
+    })();
+    return () => { cancelled = true; };
   }, [activeProjectId]);
 
   const selectedNode = nodes.find(n => n.id === selectedNodeId) ?? null;
@@ -132,7 +158,7 @@ export function App() {
     if (!selectedNode || !activeSubTool) return;
     const newSubData = { ...subData, [key]: value };
     const newData = isNamespaced ? { ...(selectedNode.data as any), [activeSubTool.id]: newSubData } : newSubData;
-    updateNodeData(selectedNode.id, newData);
+    void updateNodeData(selectedNode.id, newData);
     setNodes(nds => nds.map(n => n.id === selectedNode.id ? { ...n, data: newData } : n));
   };
 
@@ -140,7 +166,7 @@ export function App() {
     const child = nodes.find(n => n.id === childId);
     if (!child) return;
     const newData = { ...(child.data as any), tap };
-    updateNodeData(childId, newData);
+    void updateNodeData(childId, newData);
     setNodes(nds => nds.map(n => n.id === childId ? { ...n, data: newData } : n));
   };
 
@@ -166,29 +192,29 @@ export function App() {
     if (!selectedNode || !activeSubTool || !onelineResult) return;
     const nextResult = 'error' in onelineResult ? null : onelineResult.result;
     if (JSON.stringify(selectedNode.result) === JSON.stringify(nextResult)) return;
-    updateNodeResult(selectedNode.id, nextResult);
+    void updateNodeResult(selectedNode.id, nextResult);
     setNodes(prev => prev.map(n => n.id === selectedNode.id ? { ...n, result: nextResult } : n));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedNode?.id, activeSubTool?.id, JSON.stringify(subData)]);
 
-  const addNode = (parentId: string | null, type: NodeType) => {
+  const addNode = async (parentId: string | null, type: NodeType) => {
     if (!activeProjectId) return;
     const siblingCount = nodes.filter(n => n.parentId === parentId).length;
-    const created = createNode(activeProjectId, parentId, type, `${NODE_TYPE_LABEL[type]} ${siblingCount + 1}`);
-    setNodes(listNodesForProject(activeProjectId));
+    const created = await createNode(activeProjectId, parentId, type, `${NODE_TYPE_LABEL[type]} ${siblingCount + 1}`);
+    setNodes(await listNodesForProject(activeProjectId));
     setSelectedNodeId(created.id);
     setSubToolId(null);
     if (parentId) setExpanded(prev => new Set(prev).add(parentId));
     setAddingUnder(null);
   };
   const renameNodeHandler = (id: string, name: string) => {
-    renameNodeStore(id, name);
+    void renameNodeStore(id, name);
     setNodes(nds => nds.map(n => n.id === id ? { ...n, name: name.trim() || n.name } : n));
     setEditingNodeId(null);
   };
-  const deleteNodeHandler = (id: string) => {
-    deleteNodeStore(id);
-    const refreshed = activeProjectId ? listNodesForProject(activeProjectId) : [];
+  const deleteNodeHandler = async (id: string) => {
+    await deleteNodeStore(id);
+    const refreshed = activeProjectId ? await listNodesForProject(activeProjectId) : [];
     setNodes(refreshed);
     if (!refreshed.find(n => n.id === selectedNodeId)) {
       const root = refreshed.find(n => n.parentId === null);
@@ -202,26 +228,68 @@ export function App() {
   const pullFieldKey = activeSubTool?.fields.find(f => f.pull === 'faultCurrent')?.key;
   const handlePull = () => { if (pullFieldKey !== undefined && pullValue !== undefined) updateSubField(pullFieldKey, String(pullValue)); };
 
+  /** Field-check history for the currently selected node+sub-tool, compared against the live design result — used by both exports to add an optional extra section, never a separate report. */
+  const fieldCheckHistoryForExport = async (): Promise<FieldCheckHistoryRow[]> => {
+    if (!selectedNode || !activeSubTool?.fieldCheck || !onelineResult || 'error' in onelineResult) return [];
+    const checks = (await listFieldChecksForNode(selectedNode.id)).filter(c => c.subToolId === activeSubTool.id);
+    const rows: FieldCheckHistoryRow[] = [];
+    for (const c of checks) {
+      try {
+        const variance = activeSubTool.fieldCheck.computeVariance(onelineResult, c, subData);
+        rows.push({
+          timestamp: c.timestamp, note: c.note, designValue: variance.result.designValue, measuredValue: variance.result.measuredValue,
+          absoluteVariance: variance.result.absoluteVariance, percentVariance: variance.result.percentVariance,
+          warningLevel: variance.warnings[0]?.level ?? null,
+        });
+      } catch { /* skip a historical row that no longer computes (e.g. incomplete legacy data) rather than failing the whole export */ }
+    }
+    return rows;
+  };
+
   const exportPdf = async () => {
     if (!selectedNode || !activeSubTool || !onelineResult || 'error' in onelineResult) return;
     const { generateCalcPackagePdf } = await import('../../src/core/report/pdf');
+    const fieldCheckHistory = await fieldCheckHistoryForExport();
     const bytes = await generateCalcPackagePdf({
       projectName: activeProject?.name ?? 'Untitled project', nodeName: selectedNode.name, calcLabel: activeSubTool.label,
       engineVersion: onelineResult.engineVersion, generatedAt: new Date(), trace: onelineResult.trace, warnings: onelineResult.warnings, assumptions: onelineResult.assumptions,
+      fieldCheckHistory,
     });
     downloadBlob(`${selectedNode.name.replace(/\s+/g, '_')}_${activeSubTool.id}.pdf`, new Blob([bytes as BlobPart], { type: 'application/pdf' }));
   };
-  const exportCsv = () => {
+  /** Same child-Load + manual-circuit assembly the Phase-balance sub-tool's own `run()` uses, for the CSV/PDF exports that need the raw circuit list rather than just the computed PanelBalanceResult. */
+  const panelCircuitsForExport = (): PanelCircuit[] => {
+    const childRows: PanelCircuit[] = childNodes.filter(c => c.type === 'load').map(c => ({
+      name: c.name, va: Number((c.data as any).va) || 0, tap: (c.data as any).tap || 'A',
+      breakerA: (c.data as any).breakerA ? Number((c.data as any).breakerA) : undefined,
+    }));
+    const manual: PanelCircuit[] = (subData.manualCircuits ?? []) as PanelCircuit[];
+    return [...childRows, ...manual];
+  };
+
+  const exportCsv = async () => {
     if (!selectedNode || !activeSubTool || !onelineResult || 'error' in onelineResult) return;
     let csv: string;
     if (activeSubTool.id === 'balance') {
-      const childRows: PanelCircuit[] = childNodes.filter(c => c.type === 'load').map(c => ({ name: c.name, va: Number((c.data as any).va) || 0, tap: (c.data as any).tap || 'A' }));
-      const manual: PanelCircuit[] = (subData.manualCircuits ?? []) as PanelCircuit[];
-      csv = panelScheduleCsv([...childRows, ...manual], onelineResult.result);
+      csv = panelScheduleCsv(panelCircuitsForExport(), onelineResult.result);
     } else {
       csv = calcTraceCsv(onelineResult);
     }
+    const fieldCheckHistory = await fieldCheckHistoryForExport();
+    if (fieldCheckHistory.length > 0) csv = `${csv}\n\n${fieldCheckHistoryCsv(fieldCheckHistory)}`;
     downloadBlob(`${selectedNode.name.replace(/\s+/g, '_')}_${activeSubTool.id}.csv`, new Blob([csv], { type: 'text/csv' }));
+  };
+
+  const exportPanelDirectory = async () => {
+    if (!selectedNode || !activeSubTool || activeSubTool.id !== 'balance' || !onelineResult || 'error' in onelineResult) return;
+    const { generatePanelDirectoryPdf } = await import('../../src/core/report/pdf');
+    const bytes = await generatePanelDirectoryPdf({
+      projectName: activeProject?.name ?? 'Untitled project', panelName: selectedNode.name,
+      voltage: subData.voltage ? +subData.voltage : undefined, phaseConfig: subData.phaseConfig,
+      mainRatingA: subData.mainRatingA ? +subData.mainRatingA : undefined, generatedAt: new Date(),
+      circuits: panelCircuitsForExport(), balance: onelineResult.result,
+    });
+    downloadBlob(`${selectedNode.name.replace(/\s+/g, '_')}_panel_directory.pdf`, new Blob([bytes as BlobPart], { type: 'application/pdf' }));
   };
 
   // --- Workbench (quick, project-independent calculators) state ---
@@ -295,6 +363,7 @@ export function App() {
       <nav>
         <button className={`nav-item ${view === 'oneline' ? 'active' : ''}`} onClick={() => setView('oneline')}><Network size={18}/>{railOpen && 'One-line'}</button>
         <button className={`nav-item ${view === 'workbench' ? 'active' : ''}`} onClick={() => setView('workbench')}><Gauge size={18}/>{railOpen && 'Workbench'}</button>
+        <button className={`nav-item ${view === 'field' ? 'active' : ''}`} onClick={() => setView('field')}><ClipboardCheck size={18}/>{railOpen && 'Field'}</button>
         <button className="nav-item" onClick={() => setShowProjects(true)}><FileText size={18}/>{railOpen && 'Projects'}</button>
         <button className="nav-item" onClick={() => setInfoPanel('standards')}><BookOpen size={18}/>{railOpen && 'Standards'}</button>
       </nav>
@@ -304,12 +373,17 @@ export function App() {
     <main>
       <header><button className="crumb" onClick={() => setShowProjects(true)}><span>Project</span><b>{activeProject?.name ?? '—'}</b><ChevronDown size={15}/></button><div className="header-actions"><button className="icon-button" aria-label="Help" onClick={() => setInfoPanel('help')}><CircleHelp size={18}/></button><div className="avatar">JA</div></div></header>
       <section className="context">
-        <div><p className="eyebrow">{view === 'oneline' ? 'ONE-LINE PROJECT' : 'QUICK WORKBENCH'}</p><h1>{view === 'oneline' ? <>Design as a <i>connected system.</i></> : <>Electrical calculations, <i>defensible by design.</i></>}</h1><p className="subhead">{view === 'oneline' ? 'Build a one-line hierarchy — every node keeps its own inputs, results, and audit trail, with fault current and panel loading flowing between linked nodes.' : 'Every result is paired with its inputs, code references, and a transparent calculation trail.'}</p></div>
+        <div><p className="eyebrow">{view === 'oneline' ? 'ONE-LINE PROJECT' : view === 'field' ? 'FIELD VERIFICATION' : 'QUICK WORKBENCH'}</p><h1>{view === 'oneline' ? <>Design as a <i>connected system.</i></> : view === 'field' ? <>Verify the design <i>against reality.</i></> : <>Electrical calculations, <i>defensible by design.</i></>}</h1><p className="subhead">{view === 'oneline' ? 'Build a one-line hierarchy — every node keeps its own inputs, results, and audit trail, with fault current and panel loading flowing between linked nodes.' : view === 'field' ? 'Record what was actually measured at a panel or feeder and compare it against the office design — design data is never overwritten from here.' : 'Every result is paired with its inputs, code references, and a transparent calculation trail.'}</p></div>
         {view === 'workbench' && <button className="new-button" onClick={resetAll}><Plus size={18}/> New calculation</button>}
       </section>
       <div className="source-banner"><AlertTriangle size={17}/><span><b>Review table sources before issuing.</b> NEC values are cross-verified transcriptions and must be confirmed against your adopted code book.</span><button onClick={() => setShowAudit(true)}>Review status <ArrowUpRight size={14}/></button></div>
 
-      {view === 'workbench' ? <div className="workspace">
+      {view === 'field' ? (
+        <FieldView
+          projects={projects} activeProjectId={activeProjectId} onSelectProject={selectProject}
+          nodes={nodes} selectedNodeId={fieldSelectedNodeId} onSelectNode={setFieldSelectedNodeId}
+        />
+      ) : view === 'workbench' ? <div className="workspace">
         <section className="calculator-card">
           <div className="tool-tabs">{TOOLS.map(t => <button key={t.id} className={tool === t.id ? 'selected' : ''} onClick={() => setTool(t.id)}><t.icon size={17}/> {t.label}</button>)}</div>
           <div className="card-heading"><div><p className="eyebrow">{activeWbTool.eyebrow}</p><h2>{activeWbTool.label}</h2><p>{activeWbTool.blurb}</p></div><button className="settings" aria-label="Table status" onClick={() => setInfoPanel('standards')}><Settings2 size={17}/></button></div>
@@ -401,7 +475,10 @@ export function App() {
         </aside>
       </div> : <div className="workspace-oneline">
         <section className="tree-card">
-          <div className="tree-head"><p className="eyebrow">ONE-LINE TREE</p></div>
+          <div className="tree-head">
+            <p className="eyebrow">ONE-LINE TREE</p>
+            {nodes.length > 0 && <button className="tree-icon-btn" title="Add another utility source" onClick={() => addNode(null, 'utility')}><Plus size={14}/></button>}
+          </div>
           <NodeTree
             nodes={nodes} selectedId={selectedNodeId} expanded={expanded} addingUnder={addingUnder}
             editingId={editingNodeId} editDraft={nodeEditDraft}
@@ -426,7 +503,7 @@ export function App() {
                 onAddRow={() => updateSubField('manualCircuits', [...(subData.manualCircuits ?? []), { name: 'New circuit', va: 0, tap: 'A' }])}
                 onUpdateRow={(i, row) => { const arr = [...(subData.manualCircuits ?? [])]; arr[i] = row; updateSubField('manualCircuits', arr); }}
                 onRemoveRow={(i) => updateSubField('manualCircuits', (subData.manualCircuits ?? []).filter((_: any, idx: number) => idx !== i))}
-                onUpdateChildTap={updateChildTap} />
+                onUpdateChildTap={updateChildTap} onChangeField={updateSubField} />
             ) : (
               <NodeForm fields={activeSubTool.fields} data={subData} onChange={updateSubField} pullValue={pullValue} onPull={handlePull} />
             )}
@@ -434,7 +511,7 @@ export function App() {
           </>}
         </section>
         <aside className="result-card">
-          {selectedNode && activeSubTool && <NodeResultPanel tool={activeSubTool} result={onelineResult} onAudit={() => setShowAudit(true)} onExportPdf={exportPdf} onExportCsv={exportCsv} showCsv={activeSubTool.id === 'balance'} />}
+          {selectedNode && activeSubTool && <NodeResultPanel tool={activeSubTool} result={onelineResult} onAudit={() => setShowAudit(true)} onExportPdf={exportPdf} onExportCsv={exportCsv} onExportPanelDirectory={exportPanelDirectory} showCsv={activeSubTool.id === 'balance'} nodeId={selectedNode.id} onOpenFieldView={() => { setFieldSelectedNodeId(selectedNode.id); setView('field'); window.location.hash = fieldViewHash(selectedNode.id); }} />}
         </aside>
       </div>}
     </main>
@@ -471,7 +548,7 @@ function NodeTreeItem({ node, depth, ...props }: TreeSharedProps & { node: OneLi
 
   return <li>
     <div className={`tree-row ${node.id === props.selectedId ? 'selected' : ''}`} style={{ paddingLeft: depth * 16 }}>
-      <button className="tree-chevron" onClick={() => hasChildren && props.onToggleExpand(node.id)}>{hasChildren ? (isExpanded ? <ChevronDown size={14}/> : <ChevronRight size={14}/>) : <span className="tree-chevron-spacer"/>}</button>
+      <button className="tree-chevron" aria-label={hasChildren ? (isExpanded ? `Collapse ${node.name}` : `Expand ${node.name}`) : undefined} onClick={() => hasChildren && props.onToggleExpand(node.id)}>{hasChildren ? (isExpanded ? <ChevronDown size={14}/> : <ChevronRight size={14}/>) : <span className="tree-chevron-spacer"/>}</button>
       <Icon size={13} className="tree-icon"/>
       {isEditing
         ? <input autoFocus className="tree-rename" value={props.editDraft} onChange={e => props.onRenameDraftChange(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') props.onCommitRename(); if (e.key === 'Escape') props.onCommitRename(true); }} onBlur={() => props.onCommitRename()} />
@@ -511,30 +588,41 @@ function NodeForm({ fields, data, onChange, pullValue, onPull }: { fields: Field
 
 // ---------------- Panel phase-balance bespoke form ----------------
 
-function PanelBalanceForm({ subData, children, onChangePhaseConfig, onAddRow, onUpdateRow, onRemoveRow, onUpdateChildTap }: {
+function PanelBalanceForm({ subData, children, onChangePhaseConfig, onAddRow, onUpdateRow, onRemoveRow, onUpdateChildTap, onChangeField }: {
   subData: Record<string, any>; children: OneLineNode[];
   onChangePhaseConfig: (v: string) => void; onAddRow: () => void; onUpdateRow: (i: number, row: PanelCircuit) => void; onRemoveRow: (i: number) => void;
-  onUpdateChildTap: (childId: string, tap: string) => void;
+  onUpdateChildTap: (childId: string, tap: string) => void; onChangeField: (key: string, value: any) => void;
 }) {
   const childLoads = children.filter(c => c.type === 'load');
+  const childMotors = children.filter(c => c.type === 'motor');
   const manual: PanelCircuit[] = subData.manualCircuits ?? [];
   return <div className="form-grid">
     <Select label="Panel configuration" value={subData.phaseConfig} onChange={onChangePhaseConfig} options={[{ value: '3ph_4w', label: '3-phase, 4-wire (A/B/C)' }, { value: '1ph_3w', label: 'Single-phase, 3-wire (A/B)' }]}/>
+    <Input label="Voltage (nameplate, optional)" suffix="V" value={subData.voltage ?? ''} onChange={v => onChangeField('voltage', v)}/>
+    <Input label="Main breaker/lugs rating (nameplate, optional)" suffix="A" value={subData.mainRatingA ?? ''} onChange={v => onChangeField('mainRatingA', v)}/>
     <div />
     <div className="panel-schedule-block">
-      <b>Branch circuits (linked from child nodes)</b>
-      {childLoads.length === 0 ? <small>No branch-circuit children yet — use the tree's "+" on this panel to add a Load node.</small> : <table className="mini-table"><thead><tr><th>Circuit</th><th>VA</th><th>Tap</th></tr></thead>
-        <tbody>{childLoads.map(c => <tr key={c.id}><td>{c.name}</td><td>{Number((c.data as any).va) || 0}</td><td><select value={(c.data as any).tap || 'A'} onChange={e => onUpdateChildTap(c.id, e.target.value)}>{PHASE_TAPS.map(t => <option key={t} value={t}>{t}</option>)}</select></td></tr>)}</tbody>
+      <b>Branch circuits & motors (linked from child nodes)</b>
+      {childLoads.length === 0 && childMotors.length === 0 ? <small>No branch-circuit or motor children yet — use the tree's "+" on this panel to add one.</small> : <table className="mini-table"><thead><tr><th>Circuit</th><th>VA</th><th>Tap</th><th>Breaker</th></tr></thead>
+        <tbody>
+          {childLoads.map(c => <tr key={c.id}><td>{c.name}</td><td>{Number((c.data as any).va) || 0}</td><td><select value={(c.data as any).tap || 'A'} onChange={e => onUpdateChildTap(c.id, e.target.value)}>{PHASE_TAPS.map(t => <option key={t} value={t}>{t}</option>)}</select></td><td>{(c.data as any).breakerA ? `${(c.data as any).breakerA} A` : '—'}</td></tr>)}
+          {childMotors.map(c => {
+            let va: number | null = null;
+            try { va = motorChildVa(c); } catch { va = null; }
+            return <tr key={c.id}><td>{c.name}</td><td>{va !== null ? va.toFixed(0) : 'unverified HP/voltage'}</td><td>ABC (3-phase)</td><td>—</td></tr>;
+          })}
+        </tbody>
       </table>}
     </div>
     <div className="panel-schedule-block">
       <b>Manual circuits (panel-native, e.g. lighting/misc.)</b>
-      <table className="mini-table"><thead><tr><th>Name</th><th>VA</th><th>Tap</th><th/></tr></thead>
+      <table className="mini-table"><thead><tr><th>Name</th><th>VA</th><th>Tap</th><th>Breaker (A)</th><th/></tr></thead>
         <tbody>{manual.map((row, i) => <tr key={i}>
           <td><input value={row.name} onChange={e => onUpdateRow(i, { ...row, name: e.target.value })}/></td>
           <td><input type="number" value={row.va} onChange={e => onUpdateRow(i, { ...row, va: +e.target.value })}/></td>
           <td><select value={row.tap} onChange={e => onUpdateRow(i, { ...row, tap: e.target.value as PanelCircuit['tap'] })}>{PHASE_TAPS.map(t => <option key={t} value={t}>{t}</option>)}</select></td>
-          <td><button className="row-icon danger" onClick={() => onRemoveRow(i)}><Trash2 size={13}/></button></td>
+          <td><input type="number" value={row.breakerA ?? ''} onChange={e => onUpdateRow(i, { ...row, breakerA: e.target.value ? +e.target.value : undefined })}/></td>
+          <td><button className="row-icon danger" aria-label={`Remove circuit ${row.name || i + 1}`} onClick={() => onRemoveRow(i)}><Trash2 size={13}/></button></td>
         </tr>)}</tbody>
       </table>
       <button type="button" className="calculate" style={{ marginTop: 10 }} onClick={onAddRow}><Plus size={14}/> Add manual circuit</button>
@@ -544,24 +632,7 @@ function PanelBalanceForm({ subData, children, onChangePhaseConfig, onAddRow, on
 
 // ---------------- Result panels ----------------
 
-const ERROR_KIND_STYLE: Record<PresentedError['kind'], { icon: typeof AlertTriangle; note: string }> = {
-  input: { icon: Info, note: 'Fix the field above and this will calculate automatically.' },
-  coverage: { icon: OctagonAlert, note: "This isn't something you did wrong — this build hasn't verified that table entry yet." },
-  domain: { icon: AlertTriangle, note: 'The inputs are individually valid but this combination trips a rule this tool enforces.' },
-  unknown: { icon: AlertTriangle, note: '' },
-};
-
-function ErrorState({ error }: { error: PresentedError }) {
-  const style = ERROR_KIND_STYLE[error.kind];
-  return <div className={`error-state error-state-${error.kind}`}>
-    <style.icon size={23}/>
-    <b>{error.heading}</b>
-    <p>{error.detail}</p>
-    {style.note && <small>{style.note}</small>}
-  </div>;
-}
-
-function NodeResultPanel({ tool, result, onAudit, onExportPdf, onExportCsv, showCsv }: { tool: SubTool; result: CalcResult<any> | { error: PresentedError } | null; onAudit: () => void; onExportPdf: () => void; onExportCsv: () => void; showCsv: boolean }) {
+function NodeResultPanel({ tool, result, onAudit, onExportPdf, onExportCsv, onExportPanelDirectory, showCsv, nodeId, onOpenFieldView }: { tool: SubTool; result: CalcResult<any> | { error: PresentedError } | null; onAudit: () => void; onExportPdf: () => void; onExportCsv: () => void; onExportPanelDirectory: () => void; showCsv: boolean; nodeId: string; onOpenFieldView: () => void }) {
   const isError = !result || 'error' in result;
   const r = !isError ? (result as CalcResult<any>).result : null;
   const m = r ? tool.metric(r) : null;
@@ -570,11 +641,16 @@ function NodeResultPanel({ tool, result, onAudit, onExportPdf, onExportCsv, show
     {isError && <ErrorState error={result && 'error' in result ? result.error : { kind: 'input', heading: 'Nothing to calculate yet', detail: 'Fill in the fields above.' }} />}
     {m && <><div className="main-metric"><strong>{m.value}<small>{m.unit}</small></strong><span>{m.label}</span></div>
       <div className="result-rows">{tool.rows(r).map((row, i) => <div key={i}><span>{row.label}</span><b>{row.value}</b></div>)}</div></>}
+    {tool.fieldCheck && <div className="field-ref-strip">
+      <span>Field ref <code>{shortNodeRef(nodeId)}</code></span>
+      <button type="button" onClick={onOpenFieldView}><ClipboardCheck size={13}/> Open in Field view</button>
+    </div>}
     {!isError && <div className="result-actions">
       <button className="audit-link" onClick={onAudit}><ClipboardCheck size={17}/> View calculation trail <ArrowUpRight size={15}/></button>
       <div className="export-row">
         <button className="export-btn" onClick={onExportPdf}><FileDown size={15}/> PDF</button>
         {showCsv && <button className="export-btn" onClick={onExportCsv}><Table2 size={15}/> CSV</button>}
+        {showCsv && <button className="export-btn" onClick={onExportPanelDirectory}><FileDown size={15}/> Panel directory</button>}
       </div>
     </div>}
   </>;
@@ -624,7 +700,7 @@ function ProjectsPanel({ projects, activeId, onSelect, onRename, onDelete, onAdd
 
   return <div className="modal-backdrop" onMouseDown={onClose}>
     <section className="projects-modal" onMouseDown={e => e.stopPropagation()}>
-      <div className="modal-head"><div><p className="eyebrow">PROJECTS</p><h2>Switch or manage projects</h2></div><button className="icon-button" onClick={onClose}><X size={19}/></button></div>
+      <div className="modal-head"><div><p className="eyebrow">PROJECTS</p><h2>Switch or manage projects</h2></div><button className="icon-button" aria-label="Close" onClick={onClose}><X size={19}/></button></div>
       <p>Each project keeps its own one-line tree and calculations, saved locally in this browser.</p>
       <ul className="project-list">
         {projects.map(p => <li key={p.id} className={`project-row ${p.id === activeId ? 'active' : ''}`}>
@@ -643,33 +719,7 @@ function ProjectsPanel({ projects, activeId, onSelect, onRename, onDelete, onAdd
   </div>;
 }
 
-const WARNING_STYLE: Record<CalcWarning['level'], { className: string; icon: typeof AlertTriangle; heading: string }> = {
-  violation: { className: 'callout-violation', icon: OctagonAlert, heading: 'Violation' },
-  warning: { className: 'callout-warning', icon: AlertTriangle, heading: 'Warning' },
-  info: { className: 'callout-info', icon: Info, heading: 'Info' },
-};
-
-function AuditModal({ result, onClose }: { result: CalcResult<unknown>; onClose: () => void }) {
-  return <div className="modal-backdrop" onMouseDown={onClose}><section className="audit-modal" onMouseDown={e => e.stopPropagation()}>
-    <div className="modal-head"><div><p className="eyebrow">AUDIT TRAIL</p><h2>Calculation evidence</h2></div><button className="icon-button" onClick={onClose}><X size={19}/></button></div>
-    <div className="audit-meta"><span>Engine {result.engineVersion}</span><span>NEC 2023 references</span><span>Local calculation</span></div>
-    <ol className="trace-list">{result.trace.map((step, i) => <li key={i}><span>{i + 1}</span><div><b>{step.step}</b>{step.substitution && <code>{step.substitution}</code>}<p>{step.resultValue} {step.resultUnit}</p></div></li>)}</ol>
-    {(['violation', 'warning', 'info'] as const).map(level => {
-      const items = result.warnings.filter(w => w.level === level);
-      if (items.length === 0) return null;
-      const style = WARNING_STYLE[level];
-      return <div key={level} className={`callout ${style.className}`}><span className="callout-heading">{style.heading}</span>
-        {items.map((w, i) => <p key={i}><style.icon size={15}/>{w.message}</p>)}
-      </div>;
-    })}
-    {result.assumptions.length > 0 && <div className="callout callout-assumption"><span className="callout-heading">Assumptions logged</span>
-      {(result.assumptions as Assumption[]).map((a, i) => <p key={i}><Sparkles size={15}/>{a.text}</p>)}
-    </div>}
-    <button className="calculate wide" onClick={onClose}>Done</button>
-  </section></div>;
-}
-
 function InfoModal({ type, onClose }: { type: 'standards' | 'help'; onClose: () => void }) {
   const content = type === 'standards' ? ['STANDARDS STATUS', 'NEC 2023 table coverage', 'This UI exposes only the kernel’s verified subset. Unsupported values are blocked instead of estimated.'] : ['QUICK HELP', 'Use the workbench', 'Build a one-line: select a node in the tree (or add one), fill in its form, and the result card updates live. Panels auto-pull branch-circuit VA from Load children for phase balancing; feeders and motors can pull available fault current from their parent. Export a PDF calc package or CSV from any node.'];
-  return <div className="modal-backdrop" onMouseDown={onClose}><section className="info-modal" onMouseDown={e => e.stopPropagation()}><button className="icon-button close-modal" onClick={onClose}><X size={19}/></button><p className="eyebrow">{content[0]}</p><h2>{content[1]}</h2><p>{content[2]}</p><button className="calculate" onClick={onClose}>Done</button></section></div>;
+  return <div className="modal-backdrop" onMouseDown={onClose}><section className="info-modal" onMouseDown={e => e.stopPropagation()}><button className="icon-button close-modal" aria-label="Close" onClick={onClose}><X size={19}/></button><p className="eyebrow">{content[0]}</p><h2>{content[1]}</h2><p>{content[2]}</p><button className="calculate" onClick={onClose}>Done</button></section></div>;
 }

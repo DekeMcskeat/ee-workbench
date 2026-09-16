@@ -7,6 +7,8 @@ export interface PanelCircuit {
   name: string;
   va: number;
   tap: PanelPhaseTap;
+  /** As-specified/installed OCPD rating, for the printed panel directory only — not used in the balance math and left undefined (not defaulted or derived) when not entered, since inferring a breaker size from VA alone isn't something this app fabricates. */
+  breakerA?: number;
 }
 
 export interface PanelBalanceInput {

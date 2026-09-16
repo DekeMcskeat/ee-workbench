@@ -10,9 +10,12 @@ import { sizeConductor } from '../../src/core/calc/conductorSizing';
 import { sizeTransformer, calcDownstreamScc, checkInterruptingRating } from '../../src/core/calc/transformer';
 import { calcMotorStarting } from '../../src/core/calc/motorStarting';
 import { calcPanelBalance, PanelCircuit, PanelPhaseTap } from '../../src/core/calc/panelBalance';
+import { calcFeederVoltageDropVariance, calcPanelBalanceVariance, VarianceResult } from '../../src/core/calc/fieldVariance';
+import { lookupMotorFlc, MotorVoltage } from '../../src/core/tables/table430';
 import type { CalcResult, Assumption } from '../../src/core/domain/trace';
 import { ENGINE_VERSION } from '../../src/core/domain/trace';
 import type { NodeType, OneLineNode } from '../../src/core/domain/node';
+import type { FieldCheck } from '../../src/core/domain/fieldCheck';
 import { motorVoltages, tempRatings, materials } from './constants';
 
 export type FieldType = 'number' | 'text' | 'select' | 'checkbox';
@@ -26,12 +29,34 @@ export interface FieldDef {
   span2?: boolean;
   /** Marks this field eligible for a "use parent's fault current" pull button. */
   pull?: 'faultCurrent';
+  /** A blank value is fine (not required before the calc runs) — for genuinely optional nameplate/as-built data this app doesn't otherwise fabricate, e.g. an as-installed breaker rating. */
+  optional?: boolean;
 }
 
 export interface RunContext {
   node: OneLineNode;
   parent: OneLineNode | null;
   children: OneLineNode[];
+}
+
+export interface FieldMeasurementFieldDef {
+  key: string;
+  label: string;
+  suffix?: string;
+  /** Same convention as FieldDef.showIf, evaluated against the sub-tool's current (design) data — e.g. hides the C-leg current field for a 1ph_3w panel. */
+  showIf?: (data: Record<string, any>) => boolean;
+}
+
+/**
+ * Marks a sub-tool as field-checkable: the Field view lets someone standing
+ * at the node record what they actually measured (`fields`), then compares
+ * it against the design result (`computeVariance`, given the live design
+ * CalcResult, the stored FieldCheck, and the sub-tool's current data —
+ * everything a variance function needs, never re-fetched by it).
+ */
+export interface FieldCheckConfig {
+  fields: FieldMeasurementFieldDef[];
+  computeVariance: (design: CalcResult<any>, fieldCheck: FieldCheck | null | undefined, subData: Record<string, any>) => CalcResult<VarianceResult>;
 }
 
 export interface SubTool {
@@ -46,6 +71,8 @@ export interface SubTool {
   run: (data: Record<string, any>, ctx: RunContext) => CalcResult<any>;
   metric: (result: any) => { value: string; unit: string; label: string; danger?: boolean };
   rows: (result: any) => { label: string; value: string }[];
+  /** Present only for sub-tools a field engineer can practically re-measure and compare (see FieldCheckConfig). */
+  fieldCheck?: FieldCheckConfig;
 }
 
 /** Wraps plain entered/derived values into a CalcResult so every node type — even ones with no real "calculation" — shares the same audit-trail UI. */
@@ -70,7 +97,7 @@ export function wrapAsResult(entries: { label: string; value: number | string; u
  */
 export function firstInvalidNumericField(fields: FieldDef[], data: Record<string, any>): string | null {
   for (const f of fields) {
-    if (f.type !== 'number') continue;
+    if (f.type !== 'number' || f.optional) continue;
     if (f.showIf && !f.showIf(data)) continue;
     const raw = data[f.key];
     if (raw === undefined || raw === null || raw === '' || !Number.isFinite(+raw)) {
@@ -78,6 +105,22 @@ export function firstInvalidNumericField(fields: FieldDef[], data: Record<string
     }
   }
   return null;
+}
+
+/**
+ * A 3-phase motor node's steady-state VA, for panel phase-balance purposes
+ * (uses running FLC from NEC Table 430.250 — the connected-load current, not
+ * locked-rotor/starting current, which is transient and not what a panel
+ * schedule's phase balance is meant to reflect). Every motor tool in this
+ * UI is hardcoded 3-phase (see motorTool's `run`), so this mirrors that.
+ * Throws (does not fabricate) if the motor's HP/voltage combo isn't in the
+ * verified Table 430.250 subset — same as every other table lookup here.
+ */
+export function motorChildVa(node: OneLineNode): number {
+  const d = node.data as any;
+  const voltage = +d.voltage as MotorVoltage;
+  const flc = lookupMotorFlc(d.hp, voltage);
+  return Math.sqrt(3) * voltage * flc;
 }
 
 /** Looks in a node's cached result for a value usable as an upstream available fault current. */
@@ -144,18 +187,33 @@ const panelLoadTool: SubTool = {
 
 const panelBalanceTool: SubTool = {
   id: 'balance', label: 'Phase balance', eyebrow: 'PANEL SCHEDULE', blurb: 'A/B/C phase loading, auto-populated from this panel\'s branch-circuit children.',
-  defaultData: { phaseConfig: '3ph_4w', manualCircuits: [] as PanelCircuit[] },
+  defaultData: { phaseConfig: '3ph_4w', manualCircuits: [] as PanelCircuit[], voltage: '', mainRatingA: '' },
   fields: [],
   custom: true,
   run: (data, ctx) => {
-    const childRows: PanelCircuit[] = ctx.children.filter(c => c.type === 'load').map(c => ({
+    const loadRows: PanelCircuit[] = ctx.children.filter(c => c.type === 'load').map(c => ({
       name: c.name, va: Number((c.data as any).va) || 0, tap: ((c.data as any).tap as PanelPhaseTap) || 'A',
+      breakerA: (c.data as any).breakerA ? Number((c.data as any).breakerA) : undefined,
+    }));
+    // Motors are 3-phase everywhere in this UI, so they always span all
+    // three legs ('ABC') rather than taking a user-chosen tap like a Load
+    // node — see motorChildVa's doc comment for the VA sourcing.
+    const motorRows: PanelCircuit[] = ctx.children.filter(c => c.type === 'motor').map(c => ({
+      name: c.name, va: motorChildVa(c), tap: 'ABC' as PanelPhaseTap,
     }));
     const manual: PanelCircuit[] = (data.manualCircuits ?? []) as PanelCircuit[];
-    return calcPanelBalance({ phaseConfig: data.phaseConfig, circuits: [...childRows, ...manual] });
+    return calcPanelBalance({ phaseConfig: data.phaseConfig, circuits: [...loadRows, ...motorRows, ...manual] });
   },
   metric: (r) => ({ value: r.imbalancePct.toFixed(1), unit: '%', label: 'phase imbalance', danger: r.imbalancePct > 20 }),
   rows: (r) => [{ label: 'Phase A', value: `${r.phaseVa.A.toFixed(0)} VA` }, { label: 'Phase B', value: `${r.phaseVa.B.toFixed(0)} VA` }, { label: 'Phase C', value: `${r.phaseVa.C.toFixed(0)} VA` }],
+  fieldCheck: {
+    fields: [
+      { key: 'currentA', label: 'Measured current — Phase A', suffix: 'A' },
+      { key: 'currentB', label: 'Measured current — Phase B', suffix: 'A' },
+      { key: 'currentC', label: 'Measured current — Phase C', suffix: 'A', showIf: (d) => d.phaseConfig !== '1ph_3w' },
+    ],
+    computeVariance: (design, fieldCheck, subData) => calcPanelBalanceVariance(design, subData.phaseConfig, fieldCheck),
+  },
 };
 
 const feederConductorTool: SubTool = {
@@ -187,15 +245,18 @@ const feederConductorTool: SubTool = {
   }),
   metric: (r) => ({ value: r.chosenSize, unit: +r.chosenSize > 4 ? 'kcmil' : 'AWG', label: `chosen size · ${r.iterations} iteration${r.iterations === 1 ? '' : 's'}` }),
   rows: (r) => [{ label: 'Design current', value: `${r.designCurrent.toFixed(1)} A` }, { label: 'Final ampacity', value: `${r.finalAmpacity.toFixed(1)} A` }, { label: '%VD (exact)', value: `${r.pctVdExact.toFixed(2)}%` }, { label: 'EGC size', value: r.egcSize }, { label: 'OCPD', value: `${r.ocpdSize} A` }],
+  fieldCheck: {
+    fields: [{ key: 'pctVd', label: 'Measured voltage drop', suffix: '%' }],
+    computeVariance: (design, fieldCheck) => calcFeederVoltageDropVariance(design, fieldCheck),
+  },
 };
 
 const feederSccTool: SubTool = {
   id: 'scc', label: 'Fault current', eyebrow: 'POINT-TO-POINT METHOD', blurb: 'Downstream available fault current at the far end of this feeder, and an interrupting-rating check.',
-  defaultData: { upstreamIsc: '20000', lineToLineVoltage: '480', conductorConstantC: '', lengthFt: '100', parallelSets: '1', includeMotorContribution: false, totalMotorFla: '0', deviceInterruptingRating: '' },
+  defaultData: { upstreamIsc: '20000', conductorConstantC: '', lengthFt: '100', parallelSets: '1', includeMotorContribution: false, totalMotorFla: '0', deviceInterruptingRating: '' },
   fields: [
     { key: 'upstreamIsc', label: 'Upstream available fault current', type: 'number', suffix: 'A', pull: 'faultCurrent' },
-    { key: 'lineToLineVoltage', label: 'Line-to-line voltage', type: 'number', suffix: 'V' },
-    { key: 'conductorConstantC', label: 'Conductor constant C [VERIFY before use]', type: 'number' },
+    { key: 'conductorConstantC', label: 'Conductor constant C (from a verified point-to-point table, e.g. Bussmann SPD)', type: 'number' },
     { key: 'lengthFt', label: 'One-way length', type: 'number', suffix: 'ft' },
     { key: 'parallelSets', label: 'Parallel sets', type: 'number' },
     { key: 'includeMotorContribution', label: 'Include motor contribution (4x FLA, engineering approximation)', type: 'checkbox', span2: true },
@@ -207,7 +268,7 @@ const feederSccTool: SubTool = {
       throw new Error('Enter a verified point-to-point conductor constant C for this size/material — this build does not fabricate a default (see README: transformer.ts C-value gap). Common references: IEEE/Bussmann point-to-point method tables.');
     }
     const out = calcDownstreamScc({
-      upstreamIsc: +data.upstreamIsc, lengthFt: +data.lengthFt, lineToLineVoltage: +data.lineToLineVoltage,
+      upstreamIsc: +data.upstreamIsc, lengthFt: +data.lengthFt,
       conductorConstantC: +data.conductorConstantC, parallelSets: +data.parallelSets,
       includeMotorContribution: data.includeMotorContribution ? { totalMotorFla: +data.totalMotorFla } : undefined,
     });
@@ -255,19 +316,20 @@ const motorTool: SubTool = {
 
 const loadBranchTool: SubTool = {
   id: 'branch', label: 'Branch circuit', eyebrow: 'PANEL SCHEDULE INPUT', blurb: "This circuit's VA and phase tap — feeds its parent panel's Phase Balance tab automatically.",
-  defaultData: { va: '1500', tap: 'A', continuous: false },
+  defaultData: { va: '1500', tap: 'A', continuous: false, breakerA: '' },
   fields: [
     { key: 'va', label: 'Load', type: 'number', suffix: 'VA' },
     { key: 'tap', label: 'Phase tap', type: 'select', options: ['A', 'B', 'C', 'AB', 'BC', 'CA', 'ABC'].map(t => ({ value: t, label: t })) },
     { key: 'continuous', label: 'Continuous load (3+ hours)', type: 'checkbox', span2: true },
+    { key: 'breakerA', label: 'Breaker/OCPD rating (as installed, for the panel directory — optional)', type: 'number', suffix: 'A', optional: true },
   ],
   run: (data) => wrapAsResult(
     [{ label: 'Branch load', value: +data.va, unit: 'VA' }, { label: 'Phase tap', value: data.tap }],
-    { va: +data.va, tap: data.tap, continuous: !!data.continuous },
+    { va: +data.va, tap: data.tap, continuous: !!data.continuous, breakerA: data.breakerA ? +data.breakerA : undefined },
     'Single branch-circuit VA as entered — feeds the parent panel\'s Phase Balance tab automatically. Apply 125% continuous-load factor upstream, at the feeder/OCPD sizing step, per 210.19(A)(1).',
   ),
   metric: (r) => ({ value: r.va.toFixed(0), unit: 'VA', label: 'branch load' }),
-  rows: (r) => [{ label: 'Phase tap', value: r.tap }, { label: 'Continuous', value: r.continuous ? 'Yes' : 'No' }],
+  rows: (r) => [{ label: 'Phase tap', value: r.tap }, { label: 'Continuous', value: r.continuous ? 'Yes' : 'No' }, { label: 'Breaker/OCPD', value: r.breakerA ? `${r.breakerA} A` : 'not entered' }],
 };
 
 export const NODE_TOOLS: Record<NodeType, SubTool[]> = {
