@@ -4,18 +4,22 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "Run validation tests",
-      "preLaunchTask": "tsc: build - tsconfig.json",
-      "program": "${workspaceFolder}/dist/tests/validation.js",
-      "outFiles": ["${workspaceFolder}/dist/**/*.js"]
+      "name": "Debug Vitest suite",
+      "program": "${workspaceFolder}/node_modules/vitest/vitest.mjs",
+      "args": ["run"],
+      "smartStep": true,
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
     },
     {
       "type": "node",
       "request": "launch",
-      "name": "Run anti-fabrication tests",
-      "preLaunchTask": "tsc: build - tsconfig.json",
-      "program": "${workspaceFolder}/dist/tests/anti-fabrication.js",
-      "outFiles": ["${workspaceFolder}/dist/**/*.js"]
+      "name": "Debug current Vitest file",
+      "program": "${workspaceFolder}/node_modules/vitest/vitest.mjs",
+      "args": ["run", "${relativeFile}"],
+      "smartStep": true,
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
     }
   ]
 }

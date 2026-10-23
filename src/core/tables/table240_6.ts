@@ -1,5 +1,13 @@
 /**
- * NEC 2023 240.6(A) — Standard ampere ratings for fuses and inverse-time breakers.
+ * NEC 240.6(A) — Standard ampere ratings for fuses and inverse-time breakers.
+ * NEC 240.4(D) — Small-conductor OCPD caps (below).
+ *
+ * SOURCING NOTE: physically verified against a real 2017 NFPA 70 PDF — see
+ * `VERIFICATION.md` ("Physical-text pass completed 2026-09-15"): exact
+ * match, no discrepancies, for both 240.6(A) and 240.4(D). Both are
+ * unchanged 2017->2023, so the values hold for the 2023 edition too, but
+ * the check itself was performed against the 2017 physical text, not a
+ * 2023 copy.
  */
 export const STANDARD_OCPD_SIZES: number[] = [
   15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175,
@@ -17,7 +25,6 @@ export const STANDARD_OCPD_SIZES: number[] = [
  * than silently applying 240.4(B) in all cases.
  */
 export function selectOcpd(conductorAmpacity: number): { size: number; usedNextSizeUp: boolean } {
-  const exact = STANDARD_OCPD_SIZES.find(s => s <= conductorAmpacity);
   // Standard sizes are ascending; want the largest standard size <= ampacity
   // OR the next standard size up if ampacity falls between two standard sizes.
   const atOrBelow = STANDARD_OCPD_SIZES.filter(s => s <= conductorAmpacity);

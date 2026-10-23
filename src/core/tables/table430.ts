@@ -1,7 +1,13 @@
 /**
- * NEC 2023 Table 430.250 — Full-Load Current, Three-Phase AC Motors.
- * Cross-verified across 4 independent sources with identical values —
- * high confidence, standard "unverified transcription" banner still applies.
+ * NEC Table 430.250 — Full-Load Current, Three-Phase AC Motors.
+ * Cross-verified across 4 independent sources, then physically verified
+ * against a real 2017 NFPA 70 PDF — see `VERIFICATION.md` ("Physical-text
+ * pass completed 2026-09-15"). That pass found and fixed one real
+ * transcription bug (1.5 HP row, 575V column: was 2.1, corrected to 2.4).
+ * Table 430.7(B) below was also checked in the same pass: exact match, no
+ * discrepancies. Both tables are unchanged 2017->2023, so the values hold
+ * for the 2023 edition too, but the check itself was performed against the
+ * 2017 physical text, not a 2023 copy.
  *
  * LOCKED-ROTOR CURRENT (LRA) — CORRECTED SOURCING (2024 review):
  * NEC Tables 430.248-430.251 are FULL-LOAD CURRENT tables, not locked-rotor
@@ -44,6 +50,25 @@ export const TABLE_430_250: Record<string, Partial<Record<MotorVoltage, number>>
   '60': { 200: 177, 208: 169, 230: 154, 460: 77, 575: 62 },
   '75': { 200: 221, 208: 211, 230: 192, 460: 96, 575: 77 },
   '100': { 200: 285, 208: 273, 230: 248, 460: 124, 575: 99 },
+  // 125-500 HP rows added 2026-09-15 to close the high-HP gap noted in
+  // README "Known gaps". 200/208/230V are intentionally omitted: the
+  // source table dashes them (not rated / not tabulated) at these HP
+  // ratings, so per the no-fabrication policy they are left out rather
+  // than guessed, exactly like the existing rows already omit 115V above
+  // 2 HP. SOURCING: entered from the same 2017 NFPA 70 PDF used for the
+  // VERIFICATION.md physical-text pass, but NOT yet independently
+  // re-confirmed against the physical codebook a second time the way the
+  // rows above were — flagged pending that final check, per house policy.
+  // See VERIFICATION.md.
+  '125': { 460: 156, 575: 125 },
+  '150': { 460: 180, 575: 144 },
+  '200': { 460: 240, 575: 192 },
+  '250': { 460: 302, 575: 242 },
+  '300': { 460: 361, 575: 289 },
+  '350': { 460: 414, 575: 336 },
+  '400': { 460: 477, 575: 382 },
+  '450': { 460: 515, 575: 412 },
+  '500': { 460: 590, 575: 472 },
 };
 
 export function lookupMotorFlc(hp: string, voltage: MotorVoltage): number {

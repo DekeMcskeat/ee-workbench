@@ -1,11 +1,13 @@
 /**
- * NEC 2023 Table 310.15(B)(1) — Ambient Temperature Correction Factors
- * NEC 2023 Table 310.15(C)(1) — Adjustment Factors for More Than 3 CCC
+ * NEC Table 310.15(B)(1) — Ambient Temperature Correction Factors
+ * NEC Table 310.15(C)(1) — Adjustment Factors for More Than 3 CCC
  *
- * SOURCING NOTE: same caveat as table310_16.ts — third-party transcription,
- * internally cross-checked across 3 independent sources with identical
- * values, but not yet verified against the physical NFPA 70 text by this
- * build. Flag in UI as "unverified transcription" until a verification pass.
+ * SOURCING NOTE: originally a third-party transcription, cross-checked
+ * across 3 independent sources; physically verified against a real 2017
+ * NFPA 70 PDF — see `VERIFICATION.md` ("Physical-text pass completed
+ * 2026-09-15"): exact match, no discrepancies. Both tables are unchanged
+ * 2017->2023, so the values hold for the 2023 edition too, but the check
+ * itself was performed against the 2017 physical text, not a 2023 copy.
  */
 
 import { OutOfTableRangeError } from '../domain/errors';

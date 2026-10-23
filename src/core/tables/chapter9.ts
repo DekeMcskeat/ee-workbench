@@ -1,23 +1,26 @@
 /**
- * NEC 2023 Chapter 9 — Tables 1, 4, 5, 9.
+ * NEC Chapter 9 — Tables 1, 4, 5, 9.
  *
  * SOURCING NOTE (IMPORTANT — read before extending):
- * Table 5 (conductor areas) and Table 4 (conduit areas, EMT/RMC subset) are
- * populated for the THHN/THWN-2 column across the common size range and are
+ * Table 1 (fill percentages), Table 5 (conductor areas), and Table 4
+ * (conduit areas, EMT/RMC subset, THHN/THWN-2 column) were originally
  * cross-verified across independent third-party sources with matching
- * values — treated as usable for v1 with the same "unverified transcription"
- * banner as the other tables.
+ * values, then physically verified against a real 2017 NFPA 70 PDF — see
+ * `VERIFICATION.md` ("Physical-text pass completed 2026-09-15"): exact
+ * match on all three, no discrepancies (all 8 EMT rows checked for Table 4).
  *
- * Table 9 (AC resistance/reactance) is now FULLY populated, 14 AWG-1000
- * kcmil, both copper and aluminum. Earlier builds shipped only a 10-row Cu
- * subset because initial source-checking for a few sizes turned up
- * disagreement; that gap is closed — the values below are transcribed
- * directly from the official NEC Table 9 text and cross-checked field-for-
- * field against a second independent transcription of the same table, with
- * exact agreement on every overlapping row. Still worth a final visual
- * check against your own physical codebook before calling it "verified" in
- * the Standards screen, per house policy, but this is no longer a
- * real gap for common sizes/materials.
+ * Table 9 (AC resistance/reactance) is FULLY populated, 14 AWG-1000 kcmil,
+ * both copper and aluminum, transcribed directly from the official NEC
+ * Table 9 text and cross-checked field-for-field against a second
+ * independent transcription with exact agreement on every overlapping row.
+ * The subsequent physical-text pass flagged one cell for a closer look (8
+ * AWG Cu resistance, `0.78`) — resolved as a column mix-up, not a
+ * transcription error (`0.69` is a different column, "Effective Z at 0.85
+ * PF, Uncoated Copper, PVC Conduit"); see `VERIFICATION.md` for the note.
+ *
+ * All four tables above are unchanged 2017->2023, so the values hold for
+ * the 2023 edition too, but the physical check itself was performed
+ * against the 2017 physical text, not a 2023 copy.
  */
 
 import { OutOfTableRangeError, UnverifiedTableValueError } from '../domain/errors';
@@ -78,10 +81,11 @@ export function conductorAreaThhn(size: string): number {
 // from the official NEC Table 9 text (2017 edition — this table is unchanged
 // through the 2020 and 2023 editions), cross-checked field-for-field against
 // a second independent transcription of the same table, with exact
-// agreement across every overlapping row. This is the highest-confidence
-// tier used anywhere in this codebase for a Chapter 9 table; still do a
-// final visual check against your own physical codebook before final
-// release, per house policy, but this is no longer a "search results
+// agreement across every overlapping row, and physically verified against a
+// real 2017 NFPA 70 PDF (see `VERIFICATION.md`, "Physical-text pass
+// completed 2026-09-15" — one flagged cell resolved as a column mix-up, not
+// an error). This is the highest-confidence tier used anywhere in this
+// codebase for a Chapter 9 table, and is no longer a "search results
 // disagreed" gap — the earlier partial table (10 Cu sizes, no Al) is
 // replaced with the complete 14 AWG-1000 kcmil range for both materials,
 // which is also what unblocks aluminum conductors end-to-end (Table 310.16

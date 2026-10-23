@@ -3,16 +3,19 @@
  * user can actually act on, instead of a raw stack-trace-flavored string or
  * a silently-rendered "NaN%"/"Infinity%".
  *
- * Three distinct failure kinds get three distinct framings:
- *  - 'input'    — something the user can fix right now (a blank/invalid field).
- *  - 'coverage' — a table-data gap in THIS APP, not a mistake the user made.
- *  - 'domain'   — the inputs are individually valid but the combination
- *                 violates a rule this tool enforces (e.g. a code error, a
- *                 convergence failure).
+ * Four distinct failure kinds get four distinct framings:
+ *  - 'input'      — something the user can fix right now (a blank/invalid field).
+ *  - 'coverage'   — a table-data gap in THIS APP, not a mistake the user made.
+ *  - 'domain'     — the inputs are individually valid but the combination
+ *                   violates a rule this tool enforces (e.g. a code error, a
+ *                   convergence failure).
+ *  - 'unverified' — a field-vs-design comparison has nothing to compare yet
+ *                   (no field measurement recorded). Not an error the user
+ *                   needs to "fix" — a neutral, expected state.
  */
-import { MissingRequiredInputError, UnverifiedTableValueError, OutOfTableRangeError } from '../../src/core/domain/errors';
+import { MissingRequiredInputError, UnverifiedTableValueError, OutOfTableRangeError, NoFieldMeasurementError } from '../../src/core/domain/errors';
 
-export type ErrorKind = 'input' | 'coverage' | 'domain' | 'unknown';
+export type ErrorKind = 'input' | 'coverage' | 'domain' | 'unverified' | 'unknown';
 export interface PresentedError { kind: ErrorKind; heading: string; detail: string }
 
 export class InputValidationError extends Error {
@@ -34,6 +37,9 @@ export function presentError(error: unknown): PresentedError {
   }
   if (error instanceof OutOfTableRangeError) {
     return { kind: 'coverage', heading: 'Outside the tabulated range', detail: error.message };
+  }
+  if (error instanceof NoFieldMeasurementError) {
+    return { kind: 'unverified', heading: 'Not yet verified', detail: error.message };
   }
   if (error instanceof Error) {
     return { kind: 'domain', heading: "That combination isn't valid", detail: error.message };

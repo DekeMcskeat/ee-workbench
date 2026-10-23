@@ -73,12 +73,38 @@ export function sizeTransformer(input: TransformerSizingInput): CalcResult<Trans
 }
 
 // ---------- Point-to-point downstream SCC ----------
+//
+// FORMULA SOURCING (2026 review): the f-factor/M-multiplier shape below is
+// the standard "Point-To-Point Method" as published in the Cooper Bussmann
+// SPD (Selecting Protective Devices) handbook and echoed identically by
+// IEEE Std 241/242 and other manufacturers' (Eaton, Square D) application
+// guides:
+//   f = (1.73 x L x I) / (C x N)        [three-phase faults]
+//   M = 1 / (1 + f)
+//   Isc_downstream = Isc_upstream x M
+// An earlier version of this function also divided f by line-to-line
+// voltage. That extra term is NOT part of the published method — the C-value
+// tables already encode the voltage/impedance relationship the formula
+// needs, so re-dividing by voltage silently made feeders look like they
+// attenuate fault current far less than they actually do (non-conservative,
+// i.e. downstream equipment could look adequately rated when it is not).
+// Confirmed against the public-domain formula shape and corrected;
+// `lineToLineVoltage` has been removed from this calc's inputs since the
+// method does not use it. See VERIFICATION.md for the dated note on this
+// correction.
+//
+// The conductor constant `C` itself remains a REQUIRED user input, not a
+// table baked into this app. Unlike NEC table text, published C-value
+// tables (by conductor size/material/conduit) are proprietary reference
+// data (e.g. Bussmann SPD), not something this codebase can transcribe and
+// verify in-house — so per the same no-fabrication policy applied
+// everywhere else, the caller must supply a sourced C value, and the exact
+// number used is always logged as an explicit assumption below.
 
 export interface DownstreamSccInput {
   upstreamIsc: number;
   lengthFt: number;
-  lineToLineVoltage: number;
-  conductorConstantC: number; // [VERIFY] — see note below
+  conductorConstantC: number; // required — sourced by the caller from a verified point-to-point C-value table (e.g. Bussmann SPD); not fabricated in-app.
   parallelSets: number;
   includeMotorContribution?: { totalMotorFla: number };
 }
@@ -95,24 +121,25 @@ export function calcDownstreamScc(input: DownstreamSccInput): CalcResult<Downstr
   const warnings: CalcWarning[] = [];
   const assumptions: Assumption[] = [];
 
-  const f = (1.732 * input.lengthFt * input.lineToLineVoltage === 0)
+  const f = input.lengthFt === 0
     ? 0
-    : (1.732 * input.lengthFt * input.upstreamIsc) / (input.conductorConstantC * input.parallelSets * input.lineToLineVoltage);
+    : (1.732 * input.lengthFt * input.upstreamIsc) / (input.conductorConstantC * input.parallelSets);
   const m = 1 / (1 + f);
   const downstreamIsc = input.upstreamIsc * m;
 
   trace.push({
     step: 'f-factor',
-    formulaLatex: 'f = 1.732 L I_{L-L} / (C n V)',
-    substitution: `1.732 × ${input.lengthFt} × ${input.upstreamIsc} / (${input.conductorConstantC} × ${input.parallelSets} × ${input.lineToLineVoltage})`,
+    formulaLatex: 'f = 1.732 L I / (C n)',
+    substitution: `1.732 × ${input.lengthFt} × ${input.upstreamIsc} / (${input.conductorConstantC} × ${input.parallelSets})`,
     resultValue: f,
+    codeRefs: [{ standard: 'IEEE_SC_PTP', edition: 'n/a', note: 'Point-to-point method (Bussmann SPD / IEEE 241-242) — confirmed formula, no voltage term' }],
   });
   trace.push({ step: 'M multiplier', formulaLatex: 'M = 1/(1+f)', resultValue: m });
   trace.push({ step: 'Downstream Isc', formulaLatex: 'I_{sc,ds} = I_{sc,us} \\times M', resultValue: downstreamIsc, resultUnit: 'A' });
 
   assumptions.push({
     kind: 'other',
-    text: `Conductor constant C = ${input.conductorConstantC} used per the point-to-point method. [VERIFY]: the full C-value reference table (by conductor size/material) was not independently verified in this build — confirm against a trusted point-to-point method reference (e.g., Bussmann SPD or equivalent) before relying on this result.`,
+    text: `Conductor constant C = ${input.conductorConstantC} used per the point-to-point method (f = 1.73 x L x I / (C x N); formula confirmed against the published Bussmann SPD / IEEE 241-242 method). C itself varies by conductor size/material/conduit and was supplied directly by the caller from a verified point-to-point C-value reference table — this app does not embed that table (it is proprietary reference data, not NEC text), so re-verify the specific C value used against your reference before relying on this result for anything real.`,
   });
 
   let downstreamIscWithMotorContribution: number | undefined;

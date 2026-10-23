@@ -1,10 +1,13 @@
 /**
- * NEC 2023 Table 250.122 — Minimum size Equipment Grounding Conductors.
+ * NEC Table 250.122 — Minimum size Equipment Grounding Conductors.
  * Keyed by OCPD rating (round UP to next listed row, per code note).
- * SOURCING NOTE: third-party transcription, cross-verified across 5
- * independent sources with identical values through 1200A — high confidence,
- * still flagged "unverified transcription" per standard policy until keyed
- * from the physical codebook.
+ * SOURCING NOTE: originally a third-party transcription, cross-verified
+ * across 5 independent sources with identical values through 1200A;
+ * physically verified against a real 2017 NFPA 70 PDF — see
+ * `VERIFICATION.md` ("Physical-text pass completed 2026-09-15"): exact
+ * match, no discrepancies. This table is unchanged 2017->2023, so the
+ * values hold for the 2023 edition too, but the check itself was performed
+ * against the 2017 physical text, not a 2023 copy.
  */
 
 import { OutOfTableRangeError } from '../domain/errors';

@@ -1,4 +1,4 @@
-import { requireDefined } from '../domain/errors';
+import { requireDefined, UnverifiedTableValueError } from '../domain/errors';
 import { CalcResult, CalcWarning, TraceStep, ENGINE_VERSION } from '../domain/trace';
 import { lookupMotorFlc, MotorVoltage } from '../tables/table430';
 
@@ -38,7 +38,11 @@ export function calcLoad(input: LoadCalcInput): CalcResult<LoadCalcResult> {
   const areaFt2 = requireDefined(input.areaFt2, 'areaFt2');
   const vaPerFt2 = TABLE_220_12[input.occupancy];
   if (vaPerFt2 === undefined) {
-    throw new Error(`[VERIFY] Table 220.12 VA/ft² for occupancy '${input.occupancy}' is not in the verified subset (office, warehouse_storage only). Add and verify against the codebook before use.`);
+    throw new UnverifiedTableValueError(
+      'NEC Table 220.12',
+      `occupancy '${input.occupancy}'`,
+      'Only office, warehouse_storage are in the verified subset. Add and verify against the codebook before use.'
+    );
   }
 
   const lightingVa = areaFt2 * vaPerFt2;

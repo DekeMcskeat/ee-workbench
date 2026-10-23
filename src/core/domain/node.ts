@@ -1,7 +1,9 @@
 /**
- * One-line hierarchy node. A project is a tree of these: Utility -> Transformer
- * -> Panel -> Feeder -> Motor/Load, etc. Each node type maps to the calc
- * module(s) relevant to it (see ui/src/nodeConfig.ts for the type->calc wiring).
+ * One-line hierarchy node. A project is a forest of these: one or more root
+ * Utility nodes, each growing Utility -> Transformer -> Panel -> Feeder ->
+ * Motor/Load, etc. (multiple roots model e.g. dual-utility feeds or a
+ * generator as a second source). Each node type maps to the calc module(s)
+ * relevant to it (see ui/src/nodeConfig.ts for the type->calc wiring).
  *
  * `data` holds the last-entered form inputs for whichever calc module(s) this
  * node type uses (untyped here deliberately — each calc module already
@@ -21,7 +23,7 @@ export const NODE_TYPE_LABEL: Record<NodeType, string> = {
   load: 'Load (branch circuit)',
 };
 
-/** Which node types are allowed as children of a given parent type. Root nodes (parentId=null) must be 'utility'. */
+/** Which node types are allowed as children of a given parent type. Root nodes (parentId=null) must be 'utility' — any number of them per project. */
 export const ALLOWED_CHILDREN: Record<NodeType, NodeType[]> = {
   utility: ['transformer', 'feeder'],
   transformer: ['panel', 'feeder'],

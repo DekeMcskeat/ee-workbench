@@ -25,6 +25,19 @@ export class OutOfTableRangeError extends Error {
   }
 }
 
+/**
+ * A field/design comparison was requested but no field measurement has been
+ * recorded yet. Distinct from MissingRequiredInputError (a design-calc input
+ * gap) — this is specifically "nothing to compare against yet", which the UI
+ * renders as a neutral "not yet verified" state rather than a fixable error.
+ */
+export class NoFieldMeasurementError extends Error {
+  constructor(detail: string) {
+    super(`[NOT YET VERIFIED] ${detail}`);
+    this.name = 'NoFieldMeasurementError';
+  }
+}
+
 export function requireDefined<T>(value: T | undefined | null, fieldName: string): T {
   if (value === undefined || value === null) {
     throw new MissingRequiredInputError(fieldName);
